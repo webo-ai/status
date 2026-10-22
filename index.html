@@ -3,67 +3,70 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark">
-<title>웹오 서비스 상태</title>
-<style>
-  :root {
-    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --sub: #4a5263; --line: #dfe3ea;
-    --ok: #127a43; --ok-bg: #e6f4ec; --warn: #8a5a00; --warn-bg: #fdf2dc; --down: #b3261e; --down-bg: #fbe7e6;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #12151b; --card: #1b1f27; --ink: #eef1f6; --sub: #b4bccb; --line: #2e3542;
-      --ok: #5fd08f; --ok-bg: #173325; --warn: #f2c25b; --warn-bg: #3a2e12; --down: #ff8a80; --down-bg: #3d1a18;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.6 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
-  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; }
-  h1 { font-size: 1.5rem; margin: 0 0 4px; }
-  .lead { color: var(--sub); margin: 0 0 24px; }
-  .banner { border-radius: 12px; padding: 18px 20px; font-weight: 700; font-size: 1.125rem; margin-bottom: 24px; }
-  .ok { background: var(--ok-bg); color: var(--ok); }
-  .warn { background: var(--warn-bg); color: var(--warn); }
-  .down { background: var(--down-bg); color: var(--down); }
-  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 20px; margin-bottom: 24px; }
-  h2 { font-size: 1rem; margin: 16px 0 8px; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
-  li:first-child { border-top: 0; }
-  .state { font-weight: 700; white-space: nowrap; }
-  .state.ok, .state.warn, .state.down { background: none; }
-  .notice p { margin: 12px 0; }
-  .meta { color: var(--sub); font-size: 0.875rem; }
-</style>
+<meta name="description" content="웹오(WebO) 관리 화면·AI 고치기·게시·손님 사이트가 지금 잘 돌아가는지 알려 드립니다.">
+<meta name="robots" content="noindex">
+<title>정상 · 웹오 서비스 상태</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css?v=da0610bbf7">
 </head>
 <body>
-<main>
-  <h1>웹오 서비스 상태</h1>
-  <p class="lead">웹오 서버와 다른 곳에서 운영하는 페이지라, 웹오에 장애가 나도 이 페이지는 열립니다.</p>
-
-  <!-- 상태를 바꿀 때는 아래 banner 줄의 class(ok·warn·down)와 문장만 고칩니다. -->
-  <p class="banner ok" role="status">모든 서비스가 정상 운영 중입니다.</p>
-
-  <section aria-labelledby="services">
-    <h2 id="services">서비스별 상태</h2>
-    <!-- 서비스마다 state 의 class(ok·warn·down)와 글자(정상·지연·장애·점검 중)를 같이 고칩니다. -->
-    <ul>
-      <li><span>매장 홈페이지</span><span class="state ok">정상</span></li>
-      <li><span>사장님 관리 화면</span><span class="state ok">정상</span></li>
-      <li><span>AI 제작·수정</span><span class="state ok">정상</span></li>
-      <li><span>손님 상담 접수</span><span class="state ok">정상</span></li>
-    </ul>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+<header class="hd"><div class="wrap hd-in">
+  <a class="brand" href="./"><span class="logo" aria-hidden="true">Web<svg viewBox="0 0 84 76" focusable="false"><defs><linearGradient id="g-ring" x1="0" y1="1" x2="1" y2="0.1"><stop offset="0" stop-color="#12B5F5"/><stop offset=".5" stop-color="#1E6BFF"/><stop offset="1" stop-color="#B06CF5"/></linearGradient><linearGradient id="g-star" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3D7BFF"/><stop offset="1" stop-color="#B06CF5"/></linearGradient></defs><circle cx="35" cy="44" r="25" fill="none" stroke="url(#g-ring)" stroke-width="12.5"/><path d="M72 0 Q74.5 8.5 83 11 Q74.5 13.5 72 22 Q69.5 13.5 61 11 Q69.5 8.5 72 0Z" fill="url(#g-star)"/></svg></span><span class="sr">웹오</span><span class="brand-sub">서비스 상태</span></a>
+  <a class="hd-mail" href="mailto:webomni.team@gmail.com?subject=%5B%EC%9B%B9%EC%98%A4%20%EB%AC%B8%EC%9D%98%5D%20"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>문의하기</a>
+</div></header>
+<main id="main" class="wrap" tabindex="-1">
+  <section class="hero is-ok" aria-labelledby="h-status">
+    <span class="hero-mark"><svg class="ic ic-xl" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg></span>
+    <div class="hero-txt">
+      <h1 id="h-status"><span class="eyebrow">웹오 서비스 상태 · 정상</span><span class="hl">모든 서비스가 정상입니다</span></h1>
+      <p class="lead">관리 화면부터 손님 사이트까지 평소처럼 돌아갑니다.</p>
+      <ul class="hero-list" aria-label="기능별 한눈 상태"><li class="is-ok"><span>관리 화면</span> <b class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</b></li><li class="is-ok"><span>AI 고치기</span> <b class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</b></li><li class="is-ok"><span>게시</span> <b class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</b></li><li class="is-ok"><span>손님 사이트</span> <b class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</b></li></ul>
+      <p class="checked">마지막 확인 <time datetime="2026-10-22T10:45+09:00">10월 22일 (목) 오전 10:45</time> (한국 시간)</p>
+    </div>
   </section>
-
-  <section class="notice" aria-labelledby="notice">
-    <h2 id="notice">공지</h2>
-    <!-- 장애나 점검이 있으면 아래 문장을 바꾸고, 끝나면 복구 시각을 적어 둡니다. -->
-    <p>현재 공지가 없습니다.</p>
-  </section>
-
-  <p class="meta">마지막 확인: <time datetime="2026-10-21T15:50+09:00">2026년 10월 21일 15:50 (한국 시간)</time></p>
+  <div class="grid">
+    <div class="col-side">
+      <section class="card site-card is-calm" aria-labelledby="h-site"><svg class="ic ic-lg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10v9h16v-9"/><path d="M3 10l2-5h14l2 5"/><path d="M3 10h18"/><path d="M10 19v-5h4v5"/></svg><div><h2 id="h-site">손님 홈페이지는 계속 열립니다</h2><p>이미 게시한 매장 홈페이지는 관리 화면과 따로 운영됩니다.</p><p>관리 화면이나 AI 고치기가 멈춰도 손님은 홈페이지를 그대로 볼 수 있습니다.</p></div></section>
+      
+      <section class="card help" aria-labelledby="h-help">
+        <h2 id="h-help">안 될 때는 이렇게 해 주세요</h2>
+        <ul class="ticks">
+          <li>몇 분 뒤 화면을 새로 고쳐 주세요. 잠깐 끊긴 경우가 많습니다.</li>
+          <li>이 페이지가 정상인데 안 열리면 와이파이나 브라우저를 바꿔 보세요.</li>
+          <li>고친 내용이 홈페이지에 안 보이면 위 게시 상태를 확인해 주세요.</li>
+        </ul>
+      </section>
+      <section class="card contact" aria-labelledby="h-contact">
+        <h2 id="h-contact">계속 안 되면 알려 주세요</h2>
+        <p>매장 이름과 어떤 화면이 안 되는지 적어 주시면 빨리 확인합니다.</p>
+        <a class="mail-link" href="mailto:webomni.team@gmail.com?subject=%5B%EC%9B%B9%EC%98%A4%20%EB%AC%B8%EC%9D%98%5D%20"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg><span>webomni.team@gmail.com</span><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg></a>
+      </section>
+    </div>
+    <div class="col-main">
+      <section class="card c-comps" aria-labelledby="h-comps">
+        <div class="sec-head"><h2 id="h-comps">기능별 상태</h2>
+        <p class="sub">칸 하나가 하루입니다. 그날 가장 나빴던 상태를 보여 드립니다.</p></div>
+        <ul class="comps"><li class="comp"><div class="comp-top"><div><h3>관리 화면</h3><p class="sub">사장님이 로그인해 매장 정보를 보고 고치는 화면입니다.</p></div><p class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</p></div><div class="days" role="img" aria-label="최근 30일 기록: 기록한 1일 모두 정상"><span class="d is-none" title="9월 23일 기록 없음"></span><span class="d is-none" title="9월 24일 기록 없음"></span><span class="d is-none" title="9월 25일 기록 없음"></span><span class="d is-none" title="9월 26일 기록 없음"></span><span class="d is-none" title="9월 27일 기록 없음"></span><span class="d is-none" title="9월 28일 기록 없음"></span><span class="d is-none" title="9월 29일 기록 없음"></span><span class="d is-none" title="9월 30일 기록 없음"></span><span class="d is-none" title="10월 1일 기록 없음"></span><span class="d is-none" title="10월 2일 기록 없음"></span><span class="d is-none" title="10월 3일 기록 없음"></span><span class="d is-none" title="10월 4일 기록 없음"></span><span class="d is-none" title="10월 5일 기록 없음"></span><span class="d is-none" title="10월 6일 기록 없음"></span><span class="d is-none" title="10월 7일 기록 없음"></span><span class="d is-none" title="10월 8일 기록 없음"></span><span class="d is-none" title="10월 9일 기록 없음"></span><span class="d is-none" title="10월 10일 기록 없음"></span><span class="d is-none" title="10월 11일 기록 없음"></span><span class="d is-none" title="10월 12일 기록 없음"></span><span class="d is-none" title="10월 13일 기록 없음"></span><span class="d is-none" title="10월 14일 기록 없음"></span><span class="d is-none" title="10월 15일 기록 없음"></span><span class="d is-none" title="10월 16일 기록 없음"></span><span class="d is-none" title="10월 17일 기록 없음"></span><span class="d is-none" title="10월 18일 기록 없음"></span><span class="d is-none" title="10월 19일 기록 없음"></span><span class="d is-none" title="10월 20일 기록 없음"></span><span class="d is-none" title="10월 21일 기록 없음"></span><span class="d is-ok" title="10월 22일 정상"></span></div><p class="days-cap" aria-hidden="true"><span>30일 전</span><span>기록한 1일 모두 정상</span><span>오늘</span></p></li><li class="comp"><div class="comp-top"><div><h3>AI 고치기</h3><p class="sub">말로 요청하면 AI가 홈페이지 글과 디자인을 고쳐 드립니다.</p></div><p class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</p></div><div class="days" role="img" aria-label="최근 30일 기록: 기록한 1일 모두 정상"><span class="d is-none" title="9월 23일 기록 없음"></span><span class="d is-none" title="9월 24일 기록 없음"></span><span class="d is-none" title="9월 25일 기록 없음"></span><span class="d is-none" title="9월 26일 기록 없음"></span><span class="d is-none" title="9월 27일 기록 없음"></span><span class="d is-none" title="9월 28일 기록 없음"></span><span class="d is-none" title="9월 29일 기록 없음"></span><span class="d is-none" title="9월 30일 기록 없음"></span><span class="d is-none" title="10월 1일 기록 없음"></span><span class="d is-none" title="10월 2일 기록 없음"></span><span class="d is-none" title="10월 3일 기록 없음"></span><span class="d is-none" title="10월 4일 기록 없음"></span><span class="d is-none" title="10월 5일 기록 없음"></span><span class="d is-none" title="10월 6일 기록 없음"></span><span class="d is-none" title="10월 7일 기록 없음"></span><span class="d is-none" title="10월 8일 기록 없음"></span><span class="d is-none" title="10월 9일 기록 없음"></span><span class="d is-none" title="10월 10일 기록 없음"></span><span class="d is-none" title="10월 11일 기록 없음"></span><span class="d is-none" title="10월 12일 기록 없음"></span><span class="d is-none" title="10월 13일 기록 없음"></span><span class="d is-none" title="10월 14일 기록 없음"></span><span class="d is-none" title="10월 15일 기록 없음"></span><span class="d is-none" title="10월 16일 기록 없음"></span><span class="d is-none" title="10월 17일 기록 없음"></span><span class="d is-none" title="10월 18일 기록 없음"></span><span class="d is-none" title="10월 19일 기록 없음"></span><span class="d is-none" title="10월 20일 기록 없음"></span><span class="d is-none" title="10월 21일 기록 없음"></span><span class="d is-ok" title="10월 22일 정상"></span></div><p class="days-cap" aria-hidden="true"><span>30일 전</span><span>기록한 1일 모두 정상</span><span>오늘</span></p></li><li class="comp"><div class="comp-top"><div><h3>게시</h3><p class="sub">고친 내용을 손님이 보는 홈페이지에 올리고, 상담 신청을 받습니다.</p></div><p class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</p></div><div class="days" role="img" aria-label="최근 30일 기록: 기록한 1일 모두 정상"><span class="d is-none" title="9월 23일 기록 없음"></span><span class="d is-none" title="9월 24일 기록 없음"></span><span class="d is-none" title="9월 25일 기록 없음"></span><span class="d is-none" title="9월 26일 기록 없음"></span><span class="d is-none" title="9월 27일 기록 없음"></span><span class="d is-none" title="9월 28일 기록 없음"></span><span class="d is-none" title="9월 29일 기록 없음"></span><span class="d is-none" title="9월 30일 기록 없음"></span><span class="d is-none" title="10월 1일 기록 없음"></span><span class="d is-none" title="10월 2일 기록 없음"></span><span class="d is-none" title="10월 3일 기록 없음"></span><span class="d is-none" title="10월 4일 기록 없음"></span><span class="d is-none" title="10월 5일 기록 없음"></span><span class="d is-none" title="10월 6일 기록 없음"></span><span class="d is-none" title="10월 7일 기록 없음"></span><span class="d is-none" title="10월 8일 기록 없음"></span><span class="d is-none" title="10월 9일 기록 없음"></span><span class="d is-none" title="10월 10일 기록 없음"></span><span class="d is-none" title="10월 11일 기록 없음"></span><span class="d is-none" title="10월 12일 기록 없음"></span><span class="d is-none" title="10월 13일 기록 없음"></span><span class="d is-none" title="10월 14일 기록 없음"></span><span class="d is-none" title="10월 15일 기록 없음"></span><span class="d is-none" title="10월 16일 기록 없음"></span><span class="d is-none" title="10월 17일 기록 없음"></span><span class="d is-none" title="10월 18일 기록 없음"></span><span class="d is-none" title="10월 19일 기록 없음"></span><span class="d is-none" title="10월 20일 기록 없음"></span><span class="d is-none" title="10월 21일 기록 없음"></span><span class="d is-ok" title="10월 22일 정상"></span></div><p class="days-cap" aria-hidden="true"><span>30일 전</span><span>기록한 1일 모두 정상</span><span>오늘</span></p></li><li class="comp"><div class="comp-top"><div><h3>손님 사이트</h3><p class="sub">손님이 보는 매장 홈페이지입니다.</p></div><p class="state is-ok"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.5 12.5l3 3 6-6.5"/><circle cx="12" cy="12" r="9"/></svg>정상</p></div><div class="days" role="img" aria-label="최근 30일 기록: 기록한 1일 모두 정상"><span class="d is-none" title="9월 23일 기록 없음"></span><span class="d is-none" title="9월 24일 기록 없음"></span><span class="d is-none" title="9월 25일 기록 없음"></span><span class="d is-none" title="9월 26일 기록 없음"></span><span class="d is-none" title="9월 27일 기록 없음"></span><span class="d is-none" title="9월 28일 기록 없음"></span><span class="d is-none" title="9월 29일 기록 없음"></span><span class="d is-none" title="9월 30일 기록 없음"></span><span class="d is-none" title="10월 1일 기록 없음"></span><span class="d is-none" title="10월 2일 기록 없음"></span><span class="d is-none" title="10월 3일 기록 없음"></span><span class="d is-none" title="10월 4일 기록 없음"></span><span class="d is-none" title="10월 5일 기록 없음"></span><span class="d is-none" title="10월 6일 기록 없음"></span><span class="d is-none" title="10월 7일 기록 없음"></span><span class="d is-none" title="10월 8일 기록 없음"></span><span class="d is-none" title="10월 9일 기록 없음"></span><span class="d is-none" title="10월 10일 기록 없음"></span><span class="d is-none" title="10월 11일 기록 없음"></span><span class="d is-none" title="10월 12일 기록 없음"></span><span class="d is-none" title="10월 13일 기록 없음"></span><span class="d is-none" title="10월 14일 기록 없음"></span><span class="d is-none" title="10월 15일 기록 없음"></span><span class="d is-none" title="10월 16일 기록 없음"></span><span class="d is-none" title="10월 17일 기록 없음"></span><span class="d is-none" title="10월 18일 기록 없음"></span><span class="d is-none" title="10월 19일 기록 없음"></span><span class="d is-none" title="10월 20일 기록 없음"></span><span class="d is-none" title="10월 21일 기록 없음"></span><span class="d is-ok" title="10월 22일 정상"></span></div><p class="days-cap" aria-hidden="true"><span>30일 전</span><span>기록한 1일 모두 정상</span><span>오늘</span></p></li></ul>
+        <ul class="legend" aria-label="색 설명">
+          <li><span class="d is-ok"></span>정상</li><li><span class="d is-slow"></span>느림</li>
+          <li><span class="d is-down"></span>장애</li><li><span class="d is-maintenance"></span>점검</li>
+          <li><span class="d is-none"></span>기록 없음</li>
+        </ul>
+      </section>
+      <section class="card c-incs" aria-labelledby="h-incs">
+        <div class="sec-head"><h2 id="h-incs">지난 장애 기록</h2>
+        <p class="sub">최근 90일 동안 있었던 일을 적어 둡니다.</p></div>
+        <p class="empty">최근 90일 동안 기록된 장애가 없습니다.</p>
+      </section>
+    </div>
+  </div>
 </main>
+<footer class="ft"><div class="wrap">
+  <p>이 페이지는 웹오 서버와 떨어진 곳(GitHub)에서 열려, 웹오가 멈춰도 볼 수 있습니다.</p>
+  <p>상태는 10분쯤마다 자동으로 확인하고, 바뀌면 몇 분 안에 이 페이지에 반영됩니다.</p>
+  <p>© 2026 WebO(웹오)</p>
+</div></footer>
 </body>
 </html>

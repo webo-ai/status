@@ -1,0 +1,64 @@
+# 공개 주소를 10분마다 재서 status.json과 index.html을 고친다. 비밀값은 쓰지 않는다.
+# GITHUB_TOKEN으로 민 커밋은 Pages 빌드를 깨우지 않아서, 민 뒤에 빌드를 따로 부른다.
+name: status
+
+on:
+  schedule:
+    # 정각은 GitHub 예약이 몰려 늦어지기 쉬워 4분에 맞춘다. 실제로는 몇 분씩 늦게 돈다.
+    - cron: "4,14,24,34,44,54 * * * *"
+  workflow_dispatch:
+  # 사람이 status.json(공지·장애 기록)을 고쳐 밀면 index.html만 다시 그린다.
+  push:
+    branches: [main]
+    paths:
+      - status.json
+      - style.css
+      - scripts/**
+      - .github/workflows/status.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 시험
+        run: python3 -m unittest discover -s scripts -p "test_*.py"
+
+      - name: 재고 그리고 밀기
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MODE: ${{ github.event_name == 'push' && 'render' || 'run' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            python3 scripts/status.py "$MODE"
+            if git diff --quiet -- status.json index.html; then
+              echo "바뀐 내용이 없습니다."
+              exit 0
+            fi
+            git add status.json index.html
+            git commit -m "상태를 자동 확인해 고칩니다"
+            if git push origin HEAD:main; then
+              gh api -X POST "repos/$REPO/pages/builds" --silent
+              exit 0
+            fi
+            # 그 사이 사람이 민 커밋이 있으면 그 위에서 다시 재고 그린다.
+            git fetch origin main
+            git reset --hard origin/main
+          done
+          echo "세 번 밀지 못했습니다." >&2
+          exit 1
