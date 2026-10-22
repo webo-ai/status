@@ -619,8 +619,13 @@ def check_level(where: str, value: object) -> None:
         )
 
 
+def check_text(where: str, value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise StatusFileError(f"{where}이 비어 있습니다. 화면에 보일 제목을 글자로 적어 주세요.")
+
+
 def validate(doc: dict) -> None:
-    """손으로 고친 status.json이 그리기 전에 깨지지 않게 등급 값과 시각 꼴을 본다."""
+    """손으로 고친 status.json이 그리기 전에 깨지지 않게 제목·등급 값·시각 꼴을 본다."""
     check_time("checked_at", doc.get("checked_at"))
     for n, comp in enumerate(doc.get("components", [])):
         at = f"components[{n}]({comp.get('id', '?')})"
@@ -629,11 +634,15 @@ def validate(doc: dict) -> None:
         check_time(f"{at}.checked_at", comp.get("checked_at"), required=False)
     notice = doc.get("notice")
     if notice:
+        check_text("notice.title", notice.get("title"))
+        if not isinstance(notice.get("components", []), list):
+            raise StatusFileError('notice.components는 ["admin", "ai"]처럼 대괄호 목록으로 적어 주세요.')
         check_level("notice.level", notice.get("level"))
         check_time("notice.starts_at", notice.get("starts_at"), required=False)
         check_time("notice.ends_at", notice.get("ends_at"), required=False)
     for n, inc in enumerate(doc.get("incidents", [])):
         at = f"incidents[{n}]({inc.get('id', '?')})"
+        check_text(f"{at}.title", inc.get("title"))
         check_level(f"{at}.level", inc.get("level", "down"))
         check_time(f"{at}.started_at", inc.get("started_at"))
         check_time(f"{at}.resolved_at", inc.get("resolved_at"), required=False)

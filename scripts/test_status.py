@@ -388,6 +388,24 @@ class ValidateTest(unittest.TestCase):
         with self.assertRaisesRegex(status.StatusFileError, r"incidents\[0\]\(x\)\.started_at.*읽지 못했습니다"):
             status.validate(doc)
 
+    # 2차 6. 제목이 빠졌거나 영향 받는 곳이 목록이 아니면 고칠 자리를 알려 준다.
+    def test_missing_title_and_bad_components_are_named(self):
+        doc = fresh()
+        doc["notice"] = {"level": "maintenance", "components": ["admin"]}
+        with self.assertRaisesRegex(status.StatusFileError, r"notice\.title"):
+            status.validate(doc)
+        doc["notice"] = {"level": "maintenance", "title": "점검", "components": "admin"}
+        with self.assertRaisesRegex(status.StatusFileError, r"notice\.components.*목록"):
+            status.validate(doc)
+        doc = fresh()
+        doc["incidents"] = [{"id": "x", "level": "down", "title": " ", "components": ["admin"],
+                             "started_at": status.iso(T0), "resolved_at": None}]
+        with self.assertRaisesRegex(status.StatusFileError, r"incidents\[0\]\(x\)\.title"):
+            status.validate(doc)
+        del doc["incidents"][0]["title"]
+        with self.assertRaisesRegex(status.StatusFileError, r"incidents\[0\]\(x\)\.title"):
+            status.validate(doc)
+
     def test_main_stops_with_message(self):
         doc = fresh()
         doc["checked_at"] = "2026-10-22 12:00"
