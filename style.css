@@ -17,6 +17,8 @@
   --down-weak: #fdecec;
   --maintenance: #1759db;
   --maintenance-weak: #eef4ff;
+  --checking: #4a5270;
+  --checking-weak: #eef1f6;
   --cell-ok: #1f8a4c;
   --cell-slow: #b07800;
   --cell-down: #c62f2b;
@@ -45,6 +47,8 @@
     --down-weak: #341615;
     --maintenance: #8fb3ff;
     --maintenance-weak: #142142;
+    --checking: #b9c2d4;
+    --checking-weak: #1a2236;
     --cell-ok: #3fbf7a;
     --cell-slow: #d9a033;
     --cell-down: #f0605a;
@@ -245,6 +249,10 @@ main:focus {
   --tone: var(--maintenance);
   --tone-weak: var(--maintenance-weak);
 }
+.is-checking {
+  --tone: var(--checking);
+  --tone-weak: var(--checking-weak);
+}
 .hero-mark {
   display: grid;
   place-items: center;
@@ -286,10 +294,11 @@ main:focus {
   gap: 8px;
   margin-top: 16px;
 }
+/* 휴대폰 폭에선 이름 길이에 따라 한 칸만 한 줄로 붙지 않게 이름과 상태를 늘 두 줄로 쌓는다 */
 .hero-list li {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 2px 8px;
   padding: 9px 12px;
@@ -314,6 +323,16 @@ main:focus {
   color: var(--ink);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+.checked-note {
+  color: var(--sub);
+  font-size: 13px;
+}
+.pending {
+  margin-top: 6px;
+  color: var(--checking);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* 판 배치. 휴대폰은 한 줄로 쌓고 중요한 차례로 세운다 */
@@ -583,6 +602,11 @@ main:focus {
   }
   .hl {
     font-size: 32px;
+  }
+  .hero-list li {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
   }
   .card {
     padding: 24px;

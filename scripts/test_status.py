@@ -1,8 +1,13 @@
 """python3 -m unittest discover -s scripts -p "test_*.py" 로 돈다. 바깥 주소를 부르지 않는다."""
 
+import contextlib
 import copy
+import http.client
+import io
 import json
+import tempfile
 import unittest
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -43,24 +48,98 @@ class ApplyTest(unittest.TestCase):
 
     def test_api_down_stops_admin_ai_publish_with_one_incident(self):
         # 관리 화면 파일은 열려도 API가 없으면 로그인부터 안 된다.
-        doc, write = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
+        api_down = {**ALL_OK, "api": "down"}
+        doc, write = status.apply(fresh(), api_down, T0)
         self.assertTrue(write)
         self.assertEqual(state_of(doc, "admin"), "down")
         self.assertEqual(state_of(doc, "ai"), "down")
         self.assertEqual(state_of(doc, "publish"), "down")
         self.assertEqual(state_of(doc, "sites"), "ok")
+        doc, _ = status.apply(doc, api_down, T0 + timedelta(minutes=10))
         self.assertEqual(len(doc["incidents"]), 1)
         self.assertEqual(doc["incidents"][0]["components"], ["admin", "ai", "publish"])
 
     def test_later_component_joins_open_incident(self):
         doc, _ = status.apply(fresh(), {**ALL_OK, "app": "down"}, T0)
         self.assertEqual(state_of(doc, "ai"), "ok")
-        doc, _ = status.apply(doc, {"app": "down", "api": "down", "site": "ok"}, T0 + timedelta(minutes=10))
+        both = {"app": "down", "api": "down", "site": "ok"}
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=10))
+        # 관리 화면은 두 번째라 기록을 열고, AI 고치기·게시는 첫 실패라 아직 안 든다.
+        self.assertEqual(len(doc["incidents"]), 1)
+        self.assertEqual(doc["incidents"][0]["components"], ["admin"])
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=20))
         self.assertEqual(len(doc["incidents"]), 1)
         self.assertEqual(doc["incidents"][0]["components"], ["admin", "ai", "publish"])
         doc, _ = status.apply(doc, ALL_OK, T0 + timedelta(minutes=40))
         self.assertEqual(doc["incidents"][0]["resolved_at"], status.iso(T0 + timedelta(minutes=40)))
         self.assertEqual(doc["history"]["2026-10-22"]["admin"], "down")
+
+    # 1. 못 잰 기능은 확인 시각을 올리지 않고 "확인 중"으로 그린다.
+    def test_unknown_keeps_component_checked_at_and_shows_checking(self):
+        doc, _ = status.apply(fresh(), ALL_OK, T0)
+        later = T0 + timedelta(minutes=60)
+        doc, write = status.apply(doc, {**ALL_OK, "app": "unknown"}, later)
+        self.assertTrue(write)
+        admin = next(c for c in doc["components"] if c["id"] == "admin")
+        ai = next(c for c in doc["components"] if c["id"] == "ai")
+        self.assertEqual(admin["checked_at"], status.iso(T0))
+        self.assertTrue(admin["pending"])
+        self.assertEqual(ai["checked_at"], status.iso(later))
+        self.assertNotIn("pending", ai)
+        page = status.render(doc)
+        self.assertIn("관리 화면 상태를 다시 확인하고 있습니다", page)
+        self.assertIn("확인 중", page)
+        self.assertIn("마지막으로 확인한 때는 10월 22일 (목) 오후 12:00입니다.", page)
+        self.assertNotIn("모든 서비스가 정상입니다", page)
+        # 막힌 채 다음 판이 돌아도 확인 시각은 그대로다.
+        doc, _ = status.apply(doc, {**ALL_OK, "app": "unknown"}, later + timedelta(minutes=60))
+        self.assertEqual(next(c for c in doc["components"] if c["id"] == "admin")["checked_at"], status.iso(T0))
+        # 다시 재지면 풀린다.
+        doc, write = status.apply(doc, ALL_OK, later + timedelta(minutes=70))
+        self.assertTrue(write)
+        self.assertNotIn("pending", next(c for c in doc["components"] if c["id"] == "admin"))
+        self.assertIn("모든 서비스가 정상입니다", status.render(doc))
+
+    def test_known_down_is_not_hidden_by_checking(self):
+        # 화면 파일이 멈춘 게 확실하면 API를 못 쟀어도 장애로 그린다.
+        doc, _ = status.apply(fresh(), {"app": "down", "api": "unknown", "site": "ok"}, T0)
+        admin = next(c for c in doc["components"] if c["id"] == "admin")
+        self.assertEqual(status.shown(doc, admin, T0), "down")
+
+    # 2. 장애 기록은 두 번 잇달아 실패해야 연다.
+    def test_single_failure_changes_state_but_opens_no_incident(self):
+        api_down = {**ALL_OK, "api": "down"}
+        doc, write = status.apply(fresh(), api_down, T0)
+        self.assertTrue(write)
+        self.assertEqual(state_of(doc, "ai"), "down")
+        self.assertEqual(doc["incidents"], [])
+        doc, _ = status.apply(doc, ALL_OK, T0 + timedelta(minutes=10))
+        self.assertEqual(doc["incidents"], [])
+        doc, _ = status.apply(doc, api_down, T0 + timedelta(minutes=20))
+        self.assertEqual(doc["incidents"], [])
+        doc, _ = status.apply(doc, api_down, T0 + timedelta(minutes=30))
+        self.assertEqual(len(doc["incidents"]), 1)
+        # 시작 시각은 기록을 연 때가 아니라 처음 멈춘 때다.
+        self.assertEqual(doc["incidents"][0]["started_at"], status.iso(T0 + timedelta(minutes=20)))
+
+    # 3. 점검 공지가 걸려도 실제로 멈춰 있으면 자동 기록을 닫지 않는다.
+    def test_notice_does_not_resolve_open_incident_while_down(self):
+        both = {"app": "down", "api": "down", "site": "ok"}
+        doc, _ = status.apply(fresh(), both, T0)
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=10))
+        self.assertIsNone(doc["incidents"][0]["resolved_at"])
+        doc["notice"] = {
+            "level": "maintenance",
+            "title": "긴급 점검",
+            "body": "점검합니다.",
+            "components": ["admin", "ai", "publish"],
+            "starts_at": status.iso(T0 + timedelta(minutes=15)),
+            "ends_at": status.iso(T0 + timedelta(hours=2)),
+        }
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=20))
+        self.assertIsNone(doc["incidents"][0]["resolved_at"])
+        doc, _ = status.apply(doc, ALL_OK, T0 + timedelta(minutes=30))
+        self.assertEqual(doc["incidents"][0]["resolved_at"], status.iso(T0 + timedelta(minutes=30)))
 
     def test_unknown_keeps_previous_state(self):
         doc, _ = status.apply(fresh(), {**ALL_OK, "app": "down"}, T0)
@@ -107,6 +186,22 @@ class ProbeTest(unittest.TestCase):
                 mock.patch.object(status.time, "sleep"):
             self.assertEqual(status.probe("https://x", "html")[0], "unknown")
 
+    # 4. 응답이 중간에 끊기면(IncompleteRead 등) 멈춤으로 본다.
+    def test_http_exception_is_down(self):
+        res = mock.MagicMock()
+        res.__enter__.return_value = res
+        res.status = 200
+        res.read.side_effect = http.client.IncompleteRead(b"<ht", 100)
+        with mock.patch.object(status.urllib.request, "urlopen", return_value=res):
+            self.assertEqual(status.probe_once("https://x", "html"), ("down", "IncompleteRead"))
+        with mock.patch.object(status.urllib.request, "urlopen",
+                               side_effect=http.client.RemoteDisconnected("closed")):
+            self.assertEqual(status.probe_once("https://x", "html")[0], "down")
+        err = urllib.error.HTTPError("https://x", 502, "bad", {}, None)
+        err.read = mock.Mock(side_effect=http.client.IncompleteRead(b"", 10))
+        with mock.patch.object(status.urllib.request, "urlopen", side_effect=err):
+            self.assertEqual(status.probe_once("https://x", "html"), ("down", "http 502"))
+
     def test_store_needs_version_header(self):
         self.assertFalse(status.judge("store", 200, {}, b"<html>"))
         self.assertTrue(status.judge("store", 200, {"x-webo-version": "5"}, b""))
@@ -125,6 +220,7 @@ class RenderTest(unittest.TestCase):
 
     def test_api_down_page_warns_about_inquiry(self):
         doc, _ = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, T0 + timedelta(minutes=10))
         page = status.render(doc)
         self.assertIn("관리 화면, AI 고치기, 게시가 지금 멈춰 있습니다", page)
         self.assertIn("상담 신청이 접수되지 않을 수 있습니다", page)
@@ -149,6 +245,57 @@ class RenderTest(unittest.TestCase):
     def test_josa(self):
         self.assertEqual(status.josa("관리 화면", "이", "가"), "관리 화면이")
         self.assertEqual(status.josa("AI 고치기·게시", "이", "가"), "AI 고치기·게시가")
+
+    def test_one_day_reads_haru(self):
+        doc = fresh()
+        doc["history"] = {"2026-10-22": {"admin": "down", "ai": "ok"}}
+        self.assertIn("기록한 하루 중 장애 하루", status.strip(doc, "admin", T0))
+        self.assertIn("기록한 하루는 정상", status.strip(doc, "ai", T0))
+
+
+# 4. 손으로 고친 status.json이 틀리면 고칠 자리를 알려 주고 멈춘다.
+class ValidateTest(unittest.TestCase):
+    def test_base_file_is_valid(self):
+        status.validate(BASE)
+
+    def test_bad_level_is_named(self):
+        doc = fresh()
+        doc["notice"] = {"level": "maint", "title": "점검", "components": ["admin"]}
+        with self.assertRaisesRegex(status.StatusFileError, r"notice\.level.*'maint'"):
+            status.validate(doc)
+        doc = fresh()
+        doc["components"][0]["state"] = "bad"
+        with self.assertRaisesRegex(status.StatusFileError, r"components\[0\]\(admin\)\.state"):
+            status.validate(doc)
+
+    def test_time_needs_timezone_and_iso_shape(self):
+        doc = fresh()
+        doc["notice"] = {"level": "maintenance", "title": "점검", "components": ["admin"],
+                         "starts_at": "2026-10-25T02:00"}
+        with self.assertRaisesRegex(status.StatusFileError, r"notice\.starts_at.*시간대"):
+            status.validate(doc)
+        doc = fresh()
+        doc["incidents"] = [{"id": "x", "level": "down", "title": "t", "components": ["admin"],
+                             "started_at": "10월 25일 2시", "resolved_at": None}]
+        with self.assertRaisesRegex(status.StatusFileError, r"incidents\[0\]\(x\)\.started_at.*읽지 못했습니다"):
+            status.validate(doc)
+
+    def test_main_stops_with_message(self):
+        doc = fresh()
+        doc["checked_at"] = "2026-10-22 12:00"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "status.json"
+            path.write_text(json.dumps(doc, ensure_ascii=False), "utf-8")
+            err = io.StringIO()
+            with mock.patch.object(status, "STATUS", path), \
+                    mock.patch.object(status, "write_index") as write_index, \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(status.main(["render"]), 2)
+            write_index.assert_not_called()
+            self.assertIn("status.json을 고쳐야 합니다. checked_at의 시각", err.getvalue())
+            path.write_text("{", "utf-8")
+            with mock.patch.object(status, "STATUS", path), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(status.main(["render"]), 2)
 
 
 if __name__ == "__main__":
