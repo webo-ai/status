@@ -179,12 +179,23 @@ main:focus {
   min-height: 60px;
   gap: 12px;
 }
+/* 좁은 폭에선 '서비스 상태'가 한 덩어리로 로고 아래 줄로 내려간다. 내려가면 왼쪽 구분선은 밖으로 밀려 가려진다 */
 .brand {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  column-gap: 25px;
+  row-gap: 2px;
+  min-width: min-content;
+  overflow: hidden;
   color: var(--ink);
   text-decoration: none;
+}
+.logo,
+.brand-sub,
+.hd-mail {
+  flex: none;
+  white-space: nowrap;
 }
 .logo {
   display: inline-flex;
@@ -201,6 +212,7 @@ main:focus {
   overflow: visible;
 }
 .brand-sub {
+  margin-left: -13px;
   padding-left: 12px;
   border-left: 1px solid var(--line);
   color: var(--sub);
@@ -280,7 +292,8 @@ main:focus {
   overflow-wrap: normal;
 }
 /* 제목 속 기능 이름은 "AI / 고치기"처럼 두 줄로 갈리지 않게 한 덩어리로 둔다 */
-.hl .nm {
+.hl .nm,
+.stale-note .nm {
   white-space: nowrap;
 }
 .lead {

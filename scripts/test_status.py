@@ -92,7 +92,16 @@ def hl(page: str) -> str:
 
 I = status.iso
 DOWN, UNK = {"api": "down"}, {"api": "unknown"}
-STALE_NOTE = "자동 확인이 30분 넘게 되지 않은 기능이 있습니다. 그 기능은 마지막으로 확인한 때 상태를 보여 드립니다."
+STALE_NOTE = "자동 확인이 1시간 넘게 되지 않은 기능이 있습니다"
+
+
+def stale_note(*names) -> str:
+    return f"{STALE_NOTE}: {', '.join(names)}. 그 기능은 마지막으로 확인한 때 상태입니다."
+
+
+def unk(start, minutes):
+    """start부터 10분마다 minutes분까지 AI 고치기를 못 잰 판들."""
+    return [(start + timedelta(minutes=m), UNK) for m in range(10, minutes + 1, 10)]
 
 # 6차 규칙 1~7을 판 차례로 건다. (이름, 볼 기능, 판 차례, 자동 기록 [(시작, 닫힘)], 띠 칸, 칸 글)
 SCENARIOS = [
@@ -125,19 +134,22 @@ SCENARIOS = [
     ("1 점검 공지 판은 못 재도 실패 수를 0으로", "ai",
      [(at(12, 0), DOWN), (at(12, 10), UNK, notice("maintenance", at(12, 5), at(12, 15))), (at(12, 20), DOWN)],
      [], {"10/22": "점검"}, ("장애", None)),
-    # 규칙 2. 마지막 확인이 30분보다 오래된 칸에만 시각을 붙인다.
-    ("2 꼭 30분 못 재면 아직 시각을 안 붙인다", "ai",
-     [(at(12, 0), {}), (at(12, 10), UNK), (at(12, 20), UNK), (at(12, 30), UNK)],
+    # 규칙 2. 마지막 확인이 70분보다 오래된 칸에만 시각을 붙인다(7차-1).
+    ("2 꼭 70분 못 재면 아직 시각을 안 붙인다", "ai",
+     [(at(12, 0), {})] + unk(at(12, 0), 70),
      [], {"10/22": "정상"}, ("정상", None)),
-    ("2 40분 못 재면 마지막 확인 시각을 붙인다", "ai",
-     [(at(12, 0), {}), (at(12, 10), UNK), (at(12, 20), UNK), (at(12, 30), UNK), (at(12, 40), UNK)],
+    ("2 80분 못 재면 마지막 확인 시각을 붙인다", "ai",
+     [(at(12, 0), {})] + unk(at(12, 0), 80),
      [], {"10/22": "정상"}, ("정상", "마지막 확인 오후 12:00")),
-    ("2 멈춘 채 40분 못 재도 장애 칸에 시각만 붙인다", "ai",
-     [(at(12, 0), DOWN), (at(12, 10), DOWN)] + [(at(12, 20 + 10 * k), UNK) for k in range(4)],
+    ("2 멈춘 채 80분 못 재도 장애 칸에 시각만 붙인다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), DOWN)] + unk(at(12, 10), 80),
      [(I(at(12, 0)), None)], {"10/22": "장애"}, ("장애", "마지막 확인 오후 12:10")),
     ("2 날이 바뀌면 날짜까지 적는다", "ai",
-     [(at(23, 30), {}), (at(0, 10, 23), UNK)],
-     [], {"10/22": "정상"}, ("정상", "마지막 확인 10월 22일 (목) 오후 11:30")),
+     [(at(23, 0), {}), (at(0, 20, 23), UNK)],
+     [], {"10/22": "정상"}, ("정상", "마지막 확인 10월 22일 (목) 오후 11:00")),
+    ("7차-1 점검 공지가 걸린 기능은 오래 못 재도 시각을 안 붙인다", "ai",
+     [(at(12, 0), {}), (at(12, 10), UNK, notice("maintenance", at(12, 5), at(15, 0)))] + unk(at(12, 10), 80),
+     [], {"10/22": "점검"}, ("점검", None)),
     # 규칙 3. 셈.
     ("3 down, ok, down, ok 한 번 실패하고 돌아온 날은 정상", "ai",
      [(at(12, 0), DOWN), (at(12, 10), {}), (at(12, 20), DOWN), (at(12, 30), {})],
@@ -205,11 +217,26 @@ SCENARIOS = [
      [(at(23, 30), DOWN, notice("maintenance", at(23, 20), at(0, 15, 23)))]
      + [(at(23, 30) + timedelta(minutes=10 * k), DOWN) for k in range(1, 7)],
      [(I(at(0, 20, 23)), None)], {"10/22": "점검", "10/23": "장애"}, ("장애", None)),
-    # 규칙 4. 칸은 공지가 걸리면 공지 등급, 아니면 마지막으로 잰 값이다.
-    ("4 점검 중 잰 down이 공지 뒤 칸 값이다", "ai",
+    # 규칙 4. 칸은 공지가 걸리면 공지 등급, 아니면 점검·장애 공지 밖에서 마지막으로 잰 값이다(7차-3).
+    ("7차-3 점검 중 잰 down은 공지 뒤 칸 값이 아니다", "ai",
      [(at(12, 0), {}), (at(12, 10), DOWN, notice("maintenance", at(12, 5), at(12, 25))),
       (at(12, 20), DOWN), (at(12, 30), UNK)],
-     [], {"10/22": "점검"}, ("장애", None)),
+     [], {"10/22": "점검"}, ("정상", None)),
+    ("7차-3 장애 공지 중 잰 down도 공지 뒤 칸 값이 아니다", "ai",
+     [(at(12, 0), {}), (at(12, 10), DOWN, notice("down", at(12, 5), at(12, 25), ("ai",))),
+      (at(12, 20), DOWN), (at(12, 30), UNK)],
+     [], {"10/22": "장애"}, ("정상", None)),
+    ("7차-3 점검 전 장애는 점검 중 ok를 재도 공지 뒤 장애이고 기록도 안 닫는다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), DOWN), (at(12, 20), {}, notice("maintenance", at(12, 15), at(12, 35))),
+      (at(12, 30), {}), (at(12, 40), UNK)],
+     [(I(at(12, 0)), None)], {"10/22": "장애"}, ("장애", None)),
+    ("7차-3 느림 공지 중 잰 값은 그대로 칸 값이다", "ai",
+     [(at(12, 0), {}), (at(12, 10), DOWN, notice("slow", at(12, 5), at(12, 25), ("ai",))), (at(12, 30), UNK)],
+     [], {"10/22": "정상"}, ("장애", None)),
+    # 7차-4. 점검·장애 공지 판은 그 기능을 못 재도 셈을 0으로 되돌리고 띠를 공지 등급으로 칠한다.
+    ("7차-4 장애 공지 판은 못 재도 실패 수를 0으로 하고 장애로 칠한다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), UNK, notice("down", at(12, 5), at(12, 15), ("ai",))), (at(12, 20), DOWN)],
+     [], {"10/22": "장애"}, ("장애", None)),
     ("4 점검 공지 칸", "ai",
      [(at(12, 0), {}, notice("maintenance", at(11, 55), at(13, 0)))],
      [], {"10/22": "점검"}, ("점검", None)),
@@ -241,8 +268,10 @@ class ScenarioTest(unittest.TestCase):
                 self.assertEqual(strip_cells(doc, comp_id), days)
                 self.assertEqual(cell(doc, comp_id), shown)
                 page = text(status.render(doc))
-                for gone in ("확인 중", "다시 확인하고", "지금 멈춰", "마지막 확인 때", "멈췄다는 뜻은"):
+                for gone in ("확인 중", "다시 확인하고", "지금 멈춰", "멈췄다는 뜻은"):
                     self.assertNotIn(gone, page)
+                # 단정하지 않는 글은 오래 못 잰 안내가 뜬 판에만 나온다(7차-2).
+                self.assertEqual("마지막 확인 때" in page, STALE_NOTE in page)
 
     # 규칙 1·3. 실패 수와 첫 실패 시각은 기능 칸에 저장하고, 못 잰 판은 시각도 안 올린다.
     def test_streak_and_time_are_stored_on_component(self):
@@ -253,38 +282,122 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual((ai["streak"], ai["streak_since"], ai["checked_at"]), (1, I(at(12, 0)), I(at(12, 0))))
         doc = play([(at(12, 20), {"api": "slow"})], doc)
         self.assertEqual((comp_of(doc, "ai")["streak"], comp_of(doc, "ai")["streak_since"]), (0, None))
-        doc = play([(at(12, 30), DOWN), (at(12, 40), DOWN, notice("maintenance", at(12, 35), None))], doc)
+        doc = play([(at(12, 30), DOWN), (at(12, 40), {}, notice("maintenance", at(12, 35), None))], doc)
         ai = comp_of(doc, "ai")
-        # 점검 중에 잰 판도 시각과 칸 값은 올린다(규칙 4).
+        # 점검 중에 잰 판은 시각도 칸 값도 안 올린다(7차-3).
         self.assertEqual((ai["streak"], ai["streak_since"], ai["checked_at"], ai["state"]),
-                         (0, None, I(at(12, 40)), "down"))
+                         (0, None, I(at(12, 30)), "down"))
         for key in ("pending", "counted_at", "streak_missed"):
             self.assertNotIn(key, ai)
 
 
+def real_run(doc, rounds):
+    """실제로는 새로 쓰지 않은 판의 문서는 디스크에 안 남는다. 그 흐름대로 돌리고 판마다 새로 썼는지 돌려준다."""
+    writes = []
+    for when, results in rounds:
+        new, write = status.apply(doc, {**ALL_OK, **results}, when)
+        writes.append(write)
+        if write:
+            doc = new
+    return doc, writes
+
+
 class StaleNoteTest(unittest.TestCase):
-    """규칙 2. 마지막 확인이 30분보다 오래된 기능이 있으면 첫 화면에 안내 한 줄."""
+    """규칙 2. 마지막 확인이 70분보다 오래된 기능이 있으면 첫 화면에 기능 이름을 넣은 안내 한 줄(7차-1)."""
 
     def test_note_and_rewrite_follow_real_run(self):
-        # 실제로는 새로 쓰지 않은 판의 문서는 디스크에 안 남는다. 그 흐름대로 돌린다.
         doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
-        writes = []
-        for minute in (10, 20, 30, 40, 50):
-            new, write = status.apply(doc, {**ALL_OK, **UNK}, at(12, minute))
-            writes.append(write)
-            if write:
-                doc = new
-        self.assertEqual(writes, [False, False, False, True, False])
-        page = status.render(doc)
-        self.assertIn(STALE_NOTE, text(page))
-        self.assertEqual(text(page).count(STALE_NOTE), 1)
+        doc, writes = real_run(doc, [(at(12, 0) + timedelta(minutes=m), UNK) for m in range(10, 91, 10)])
+        # 13:00은 55분 시각 갱신, 13:20은 안내가 뜨는 판이다. 70분째인 13:10엔 아직 안 뜬다.
+        self.assertEqual(writes, [False, False, False, False, False, True, False, True, False])
+        page = text(status.render(doc))
+        want = stale_note("관리 화면", "AI 고치기", "게시")
+        self.assertIn(want, page)
+        self.assertEqual(page.count(STALE_NOTE), 1)
         self.assertEqual(cell(doc, "ai"), ("정상", "마지막 확인 오후 12:00"))
         self.assertEqual(cell(doc, "sites"), ("정상", None))
-        self.assertEqual(hl(page), "모든 서비스가 정상입니다")
         # 다시 재지면 그 판에 새로 쓰고 안내가 사라진다.
-        doc, write = status.apply(doc, ALL_OK, at(13, 0))
+        doc, write = status.apply(doc, ALL_OK, at(13, 40))
         self.assertTrue(write)
         self.assertNotIn(STALE_NOTE, text(status.render(doc)))
+
+    # 30분 기준이면 거짓으로 뜨던 판. 다 쟀지만 55분마다만 써서 저장된 기능 시각이 이르다.
+    def test_heartbeat_gap_alone_does_not_raise_note(self):
+        doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
+        doc, writes = real_run(doc, [(at(12, m), {}) for m in range(10, 51, 10)] + [(at(13, 0), UNK)])
+        self.assertEqual(writes, [False] * 5 + [True])
+        self.assertEqual(comp_of(doc, "ai")["checked_at"], I(at(12, 0)))
+        self.assertNotIn(STALE_NOTE, text(status.render(doc)))
+        # 그다음 판도 못 재면 70분이 안 넘어 아직 안 뜨고, 80분째 판에 뜬다.
+        doc, writes = real_run(doc, [(at(13, 10), UNK), (at(13, 20), UNK)])
+        self.assertEqual(writes, [False, True])
+        self.assertIn(stale_note("관리 화면", "AI 고치기", "게시"), text(status.render(doc)))
+
+    # 공지가 걸린 기능은 칸이 공지 등급이라 안내에서 뺀다. 공지가 끝나면 다시 든다.
+    def test_noticed_component_is_left_out(self):
+        doc = play([(at(12, 0), {}), (at(12, 10), {"app": "unknown", "api": "unknown", "site": "unknown"},
+                                      notice("maintenance", at(12, 5), at(13, 30)))]
+                   + [(at(12, 10) + timedelta(minutes=m), {"app": "unknown", "api": "unknown", "site": "unknown"})
+                      for m in range(10, 71, 10)])
+        page = text(status.render(doc))
+        self.assertIn(stale_note("손님 사이트"), page)
+        self.assertNotIn("마지막 확인 오후", text(status.render(doc).split('<li class="comp">')[1]))
+        # 점검 끝난 직후. 다시 재기 전에 그리면 점검 전 값이 오래됐다고 알린다.
+        page = text(status.render(doc, at(13, 31)))
+        self.assertIn(stale_note("관리 화면", "AI 고치기", "게시", "손님 사이트"), page)
+        self.assertEqual(cell(doc, "ai", at(13, 31)), ("정상", "마지막 확인 오후 12:00"))
+        self.assertEqual(cell(doc, "ai"), ("점검", None))
+        # 공지에 든 기능만 오래 못 쟀으면 안내가 안 뜬다. 느림 공지도 칸이 공지 등급이라 같다.
+        for level in ("maintenance", "down", "slow"):
+            with self.subTest(level):
+                doc = play([(at(12, 0), {}), (at(12, 10), UNK, notice(level, at(12, 5), None, ("ai", "admin", "publish")))]
+                           + unk(at(12, 10), 80))
+                self.assertNotIn(STALE_NOTE, text(status.render(doc)))
+                self.assertEqual(status.stale_ids(doc), [])
+
+    # 7차-2. 안내가 뜬 판엔 첫 화면 제목·안내 글·손님 홈페이지 칸을 단정하지 않는다.
+    def test_note_makes_headline_and_site_card_unsure(self):
+        late = [(at(12, 0), {})] + unk(at(12, 0), 80)
+        rows = [
+            ("정상", late, "마지막 확인 때 모든 서비스가 정상이었습니다",
+             "마지막 확인 때는 관리 화면부터 손님 사이트까지 평소처럼 돌아갔습니다.",
+             "is-calm", "손님 홈페이지는 마지막 확인 때 열렸습니다"),
+            ("멈춤", [(at(12, 0), DOWN)] + unk(at(12, 0), 80), "관리 화면, AI 고치기, 게시가 마지막 확인 때 멈춰 있었습니다",
+             "원인을 찾고 있습니다. 바뀌는 대로 이 페이지에 알려 드립니다.",
+             "is-calm", "손님 홈페이지는 마지막 확인 때 열렸습니다"),
+            ("느림", [(at(12, 0), {"api": "slow"})] + unk(at(12, 0), 80),
+             "관리 화면, AI 고치기, 게시가 마지막 확인 때 평소보다 느렸습니다",
+             "마지막 확인 때는 열리기는 했지만 평소보다 오래 걸렸습니다.", "is-calm", "마지막 확인 때 열렸습니다"),
+            ("손님 사이트 멈춤", [(at(12, 0), {"site": "down"})]
+             + [(at(12, 0) + timedelta(minutes=m), {"site": "unknown"}) for m in range(10, 81, 10)],
+             "손님 사이트가 마지막 확인 때 멈춰 있었습니다", "원인을 찾고 있습니다.",
+             "is-down", "손님 홈페이지가 마지막 확인 때 열리지 않았습니다"),
+            ("손님 사이트 느림", [(at(12, 0), {"site": "slow"})]
+             + [(at(12, 0) + timedelta(minutes=m), {"site": "slow", "api": "unknown"}) for m in range(10, 81, 10)],
+             "손님 사이트가 마지막 확인 때 평소보다 느렸습니다", "마지막 확인 때는", "is-neutral", "잠시 불편할 수 있습니다"),
+        ]
+        for name, steps, title, lead, tone, site in rows:
+            with self.subTest(name):
+                page = status.render(play(steps))
+                self.assertIn(STALE_NOTE, text(page))
+                self.assertEqual(hl(page), title)
+                self.assertIn(lead, text(re.search(r'<p class="lead">.*?</p>', page).group(0)))
+                card = re.search(r'<section class="card site-card (is-\w+)".*?</section>', page)
+                self.assertEqual(card.group(1), tone)
+                self.assertIn(site, text(card.group(0)))
+                for sure in ("정상입니다", "멈춰 있습니다", "느립니다", "계속 열립니다", "지금 열리지"):
+                    self.assertNotIn(sure, text(page).split("안 될 때는")[0])
+        # 안내가 없으면 예전처럼 단정한다.
+        page = status.render(play([(at(12, 0), {})] + unk(at(12, 0), 70)))
+        self.assertEqual(hl(page), "모든 서비스가 정상입니다")
+        self.assertIn("손님 홈페이지는 계속 열립니다", page)
+        # 점검 공지 제목은 공지에서 온 글이라 그대로 둔다.
+        page = status.render(play([(at(12, 0), {}), (at(12, 10), {"site": "unknown"},
+                                   notice("maintenance", at(12, 5), at(15, 0), title="관리 화면 정기 점검"))]
+                                  + [(at(12, 10) + timedelta(minutes=m), {"site": "unknown"}) for m in range(10, 81, 10)]))
+        self.assertIn(stale_note("손님 사이트"), text(page))
+        self.assertEqual(hl(page), "관리 화면 정기 점검")
+        self.assertIn("손님 홈페이지는 마지막 확인 때 열렸습니다", page)
 
     def test_no_note_while_measured_inside_heartbeat(self):
         # 다 잰 판인데 55분 안이라 안 쓴 경우. 디스크 문서의 기능 시각은 문서 시각과 같아 안내가 안 뜬다.
@@ -350,6 +463,36 @@ class SiteCardTest(unittest.TestCase):
                 self.assertIn(title, card.group(0))
                 if tone != "is-calm":
                     self.assertNotIn("계속 열립니다", card.group(0))
+
+    # 7차-6. 첫 화면이 점검 공지 제목·본문을 보이면 '지금 안내' 칸은 기간과 영향 기능만 적는다.
+    def test_notice_card_does_not_repeat_hero(self):
+        maint = dict(notice("maintenance", at(11, 55), at(13, 0), title="관리 화면 정기 점검"), body="더 빠르게 바꿉니다.")
+
+        def card(page):
+            found = re.search(r'<section class="card notice".*?</section>', page)
+            return found and text(found.group(0))
+
+        page = status.render(play([(at(12, 0), {}, maint)]))
+        self.assertEqual(hl(page), "관리 화면 정기 점검")
+        self.assertEqual(text(page).count("관리 화면 정기 점검"), 1)
+        self.assertEqual(text(page).count("더 빠르게 바꿉니다."), 1)
+        self.assertEqual(card(page), "지금 안내점검 시간과 영향 받는 기능"
+                         "10월 22일 (목) 오전 11:55부터 10월 22일 (목) 오후 1:00까지영향 받는 곳: 관리 화면·AI 고치기·게시")
+        # 기간이 없으면 영향 기능만 적는다.
+        page = status.render(play([(at(12, 0), {}, dict(maint, starts_at=None, ends_at=None))]))
+        self.assertEqual(hl(page), "관리 화면 정기 점검")
+        self.assertEqual(card(page), "지금 안내점검 시간과 영향 받는 기능영향 받는 곳: 관리 화면·AI 고치기·게시")
+        # 첫 화면이 공지를 안 쓰는 판은 칸에 제목·본문을 그대로 적는다.
+        rows = [
+            ("예정", [(at(11, 0), {}, maint)]),
+            ("손님 사이트가 멈춰 첫 화면이 멈춤", [(at(12, 0), {"site": "down"}, maint)]),
+            ("느림 공지", [(at(12, 0), {}, dict(maint, level="slow"))]),
+        ]
+        for name, steps in rows:
+            with self.subTest(name):
+                page = status.render(play(steps))
+                self.assertIn("관리 화면 정기 점검", card(page))
+                self.assertIn("더 빠르게 바꿉니다.", card(page))
 
     def test_publish_stop_warns_about_inquiry(self):
         page = status.render(play([(at(12, 0), DOWN), (at(12, 10), DOWN)]))
@@ -764,6 +907,27 @@ class ValidateTest(unittest.TestCase):
                 doc.update(change)
                 with self.assertRaisesRegex(status.StatusFileError, pattern):
                     status.validate(doc)
+
+    # 7차-7. 실패 수가 있는데 첫 실패 시각이 비면 막고, apply도 그 조합에서 죽지 않는다.
+    def test_streak_needs_streak_since(self):
+        for streak, since in ((1, None), (2, None)):
+            with self.subTest(streak=streak, since=since):
+                doc = fresh()
+                comp_of(doc, "ai").update(streak=streak, streak_since=since)
+                with self.assertRaisesRegex(status.StatusFileError,
+                                            rf"components\[1\]\(ai\)\.streak가 {streak}인데 streak_since가 비어"):
+                    status.validate(doc)
+        doc = fresh()
+        comp_of(doc, "ai").update(streak=0, streak_since=None)
+        status.validate(doc)
+        comp_of(doc, "ai").update(streak=1, streak_since=I(at(11, 50)))
+        status.validate(doc)
+        # 검사를 건너뛴 문서여도 apply는 1부터 다시 센다.
+        doc = fresh()
+        comp_of(doc, "ai").update(streak=1, streak_since=None)
+        doc, _ = status.apply(doc, {**ALL_OK, **DOWN}, at(12, 0))
+        ai = comp_of(doc, "ai")
+        self.assertEqual((ai["streak"], ai["streak_since"], doc["incidents"]), (1, I(at(12, 0)), []))
 
     def test_main_stops_with_message(self):
         doc = fresh()
