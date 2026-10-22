@@ -41,15 +41,20 @@ class ApplyTest(unittest.TestCase):
         self.assertTrue(write)
         self.assertEqual(new["checked_at"], status.iso(T0 + timedelta(minutes=55)))
 
-    def test_api_down_marks_ai_and_publish_and_opens_one_incident(self):
+    def test_api_down_stops_admin_ai_publish_with_one_incident(self):
+        # 관리 화면 파일은 열려도 API가 없으면 로그인부터 안 된다.
         doc, write = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
         self.assertTrue(write)
+        self.assertEqual(state_of(doc, "admin"), "down")
         self.assertEqual(state_of(doc, "ai"), "down")
         self.assertEqual(state_of(doc, "publish"), "down")
-        self.assertEqual(state_of(doc, "admin"), "ok")
+        self.assertEqual(state_of(doc, "sites"), "ok")
         self.assertEqual(len(doc["incidents"]), 1)
-        self.assertEqual(doc["incidents"][0]["components"], ["ai", "publish"])
-        # 다음 판에 관리 화면까지 멈추면 같은 기록에 더한다.
+        self.assertEqual(doc["incidents"][0]["components"], ["admin", "ai", "publish"])
+
+    def test_later_component_joins_open_incident(self):
+        doc, _ = status.apply(fresh(), {**ALL_OK, "app": "down"}, T0)
+        self.assertEqual(state_of(doc, "ai"), "ok")
         doc, _ = status.apply(doc, {"app": "down", "api": "down", "site": "ok"}, T0 + timedelta(minutes=10))
         self.assertEqual(len(doc["incidents"]), 1)
         self.assertEqual(doc["incidents"][0]["components"], ["admin", "ai", "publish"])
@@ -121,7 +126,7 @@ class RenderTest(unittest.TestCase):
     def test_api_down_page_warns_about_inquiry(self):
         doc, _ = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
         page = status.render(doc)
-        self.assertIn("AI 고치기·게시가 지금 멈춰 있습니다", page)
+        self.assertIn("관리 화면, AI 고치기, 게시가 지금 멈춰 있습니다", page)
         self.assertIn("상담 신청이 접수되지 않을 수 있습니다", page)
         self.assertIn("진행 중", page)
 

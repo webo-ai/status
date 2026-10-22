@@ -23,7 +23,7 @@ GitHub Actions가 10분마다(정각 뒤 4분부터) 공개 주소 셋을 GET으
 
 | 기능 | 재는 주소 | 정상 판정 |
 |---|---|---|
-| 관리 화면 | `https://app.webomni.dpdns.org/` | 200이고 HTML |
+| 관리 화면 | `https://app.webomni.dpdns.org/`와 API `/healthz` | 화면 파일이 200이고 HTML이며, API도 정상. API가 없으면 로그인부터 안 돼서 둘 중 나쁜 쪽을 따릅니다 |
 | AI 고치기·게시 | `https://api.webomni.dpdns.org/healthz` | 200이고 `{"status":"ok"}` |
 | 손님 사이트 | `https://demo-skin.webomni.dpdns.org/` (시연 매장) | 200이고 `x-webo-version` 머리가 있음 |
 

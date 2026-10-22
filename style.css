@@ -273,6 +273,7 @@ main:focus {
   font-weight: 750;
   letter-spacing: -0.025em;
   text-wrap: balance;
+  overflow-wrap: normal;
 }
 .lead {
   margin-top: 8px;

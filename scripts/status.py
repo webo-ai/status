@@ -152,9 +152,14 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     new = copy.deepcopy(doc)
     names = {c["id"]: c["name"] for c in new["components"]}
     for comp in new["components"]:
-        state = results.get(comp["check"], "unknown")
-        if state == "unknown":
+        # 기능 하나가 주소 여럿에 기대면(관리 화면은 화면 파일과 API) 그중 나쁜 쪽을 따른다.
+        checks = comp["check"] if isinstance(comp["check"], list) else [comp["check"]]
+        seen = [results.get(c, "unknown") for c in checks]
+        known = [s for s in seen if s != "unknown"]
+        # 하나라도 못 쟀으면 멈춤이 확실할 때만 바꾸고, 아니면 앞 상태를 둔다.
+        if not known or (len(known) < len(seen) and "down" not in known):
             continue
+        state = max(known, key=RANK.__getitem__)
         if comp["state"] != state:
             comp["state"] = state
             comp["since"] = iso(now)
@@ -265,7 +270,7 @@ LOGO = (
 def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
     names = {c["id"]: c["name"] for c in doc["components"]}
     worst = max(states.values(), key=RANK.__getitem__)
-    hit = "·".join(names[i] for i, s in states.items() if s == worst)
+    hit = ", ".join(names[i] for i, s in states.items() if s == worst)
     if worst == "ok":
         return worst, "모든 서비스가 정상입니다", "관리 화면부터 손님 사이트까지 평소처럼 돌아갑니다."
     if worst == "slow":
