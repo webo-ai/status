@@ -411,6 +411,12 @@ main:focus {
 .site-card.is-down .ic-lg {
   color: var(--down);
 }
+.site-card.is-neutral {
+  border-left-color: var(--checking);
+}
+.site-card.is-neutral .ic-lg {
+  color: var(--checking);
+}
 .site-card h2 {
   margin-bottom: 6px;
 }
