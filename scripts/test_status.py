@@ -308,8 +308,8 @@ class StaleNoteTest(unittest.TestCase):
     def test_note_and_rewrite_follow_real_run(self):
         doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
         doc, writes = real_run(doc, [(at(12, 0) + timedelta(minutes=m), UNK) for m in range(10, 91, 10)])
-        # 13:00은 55분 시각 갱신, 13:20은 안내가 뜨는 판이다. 70분째인 13:10엔 아직 안 뜬다.
-        self.assertEqual(writes, [False, False, False, False, False, True, False, True, False])
+        # 12:50은 잰 손님 사이트의 저장 시각이 50분 이른 판, 13:20은 안내가 뜨는 판이다. 70분째인 13:10엔 아직 안 뜬다.
+        self.assertEqual(writes, [False, False, False, False, True, False, False, True, False])
         page = text(status.render(doc))
         want = stale_note("관리 화면", "AI 고치기", "게시")
         self.assertIn(want, page)
@@ -321,17 +321,33 @@ class StaleNoteTest(unittest.TestCase):
         self.assertTrue(write)
         self.assertNotIn(STALE_NOTE, text(status.render(doc)))
 
-    # 30분 기준이면 거짓으로 뜨던 판. 다 쟀지만 55분마다만 써서 저장된 기능 시각이 이르다.
-    def test_heartbeat_gap_alone_does_not_raise_note(self):
-        doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
-        doc, writes = real_run(doc, [(at(12, m), {}) for m in range(10, 51, 10)] + [(at(13, 0), UNK)])
-        self.assertEqual(writes, [False] * 5 + [True])
-        self.assertEqual(comp_of(doc, "ai")["checked_at"], I(at(12, 0)))
-        self.assertNotIn(STALE_NOTE, text(status.render(doc)))
-        # 그다음 판도 못 재면 70분이 안 넘어 아직 안 뜨고, 80분째 판에 뜬다.
-        doc, writes = real_run(doc, [(at(13, 10), UNK), (at(13, 20), UNK)])
-        self.assertEqual(writes, [False, True])
+    # 8차-2. 12:00에 쓰고 12:10~12:50은 다 쟀고, 13:00은 API를 못 쟀고, 13:10은 다 쟀고, 13:20에 한 판 못 잰 흐름.
+    # 실제로 못 잰 시간은 10분이라 안내가 뜨면 안 된다.
+    def test_measured_rounds_keep_saved_time_close(self):
+        start, _ = status.apply(fresh(), ALL_OK, at(12, 0))
+        rounds = [(at(12, m), {}) for m in range(10, 51, 10)] + [(at(13, 0), UNK), (at(13, 10), {}), (at(13, 20), UNK)]
+        doc, writes = real_run(start, rounds)
+        # 12:50은 잰 기능의 저장 시각이 50분 이른 판이라 새로 쓴다. 그 뒤 판은 쓸 까닭이 없다.
+        self.assertEqual(writes, [False, False, False, False, True, False, False, False])
+        self.assertEqual(comp_of(doc, "ai")["checked_at"], I(at(12, 50)))
+        self.assertNotIn(STALE_NOTE, text(status.render(doc, at(13, 20))))
+        # 예약이 밀려 12:50 다음 판이 13:15이고 그 판을 못 재도, 저장 시각이 12:50이라 안내가 안 뜬다.
+        doc, writes = real_run(start, [(at(12, m), {}) for m in range(10, 51, 10)] + [(at(13, 15), UNK)])
+        self.assertEqual(writes, [False, False, False, False, True, False])
+        self.assertNotIn(STALE_NOTE, text(status.render(doc, at(13, 15))))
+        # 12:40까지 재고 그 뒤로 못 재면 저장 시각 12:00에서 70분이 넘는 13:20에 뜬다. 실제로 못 잰 지 40분이다.
+        doc, writes = real_run(start, [(at(12, m), {}) for m in range(10, 41, 10)]
+                               + [(at(12, 50), UNK), (at(13, 0), UNK), (at(13, 10), UNK), (at(13, 20), UNK)])
+        self.assertEqual(writes, [False, False, False, False, True, False, False, True])
         self.assertIn(stale_note("관리 화면", "AI 고치기", "게시"), text(status.render(doc)))
+
+    # 8차-2. 지난 쓴 판에 못 잰 기능이 다시 재지면 50분 전이어도 그 판에 새로 써서 저장 시각이 따라온다.
+    def test_measured_again_after_unmeasured_write_rewrites(self):
+        doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
+        doc, writes = real_run(doc, [(at(12, 10), {"api": "unknown", "site": "slow"}), (at(12, 20), {"site": "slow"}),
+                                     (at(12, 30), {"site": "slow"})])
+        self.assertEqual(writes, [True, True, False])
+        self.assertEqual(comp_of(doc, "ai")["checked_at"], I(at(12, 20)))
 
     # 공지가 걸린 기능은 칸이 공지 등급이라 안내에서 뺀다. 공지가 끝나면 다시 든다.
     def test_noticed_component_is_left_out(self):
@@ -399,12 +415,47 @@ class StaleNoteTest(unittest.TestCase):
         self.assertEqual(hl(page), "관리 화면 정기 점검")
         self.assertIn("손님 홈페이지는 마지막 확인 때 열렸습니다", page)
 
+    # 8차-1. 가장 나쁜 상태를 만든 기능에 사람이 건 공지가 있으면 다른 기능을 오래 못 재도 제목은 단정한다.
+    # 손님 칸도 손님 사이트에 공지가 걸렸으면 단정한다. '지금 안내' 칸과 어긋나지 않게 하려는 것이다.
+    def test_notice_keeps_headline_and_site_card_sure(self):
+        def late_with(level):
+            return play([(at(12, 0), {}), (at(12, 10), UNK, notice(level, at(12, 5), None, ("sites",), "손님 사이트 안내"))]
+                        + unk(at(12, 10), 80))
+
+        rows = [
+            ("장애 공지", "down", "손님 사이트가 멈춰 있습니다", "원인을 찾아 고치고 있습니다.",
+             "is-down", "손님 홈페이지가 지금 열리지 않습니다"),
+            ("느림 공지", "slow", "손님 사이트가 평소보다 느립니다", "열리기는 하지만 평소보다 오래 걸릴 수 있습니다.",
+             "is-neutral", "손님 홈페이지가 잠시 불편할 수 있습니다"),
+            ("정상 공지", "ok", "마지막 확인 때 모든 서비스가 정상이었습니다", "마지막 확인 때는",
+             "is-calm", "손님 홈페이지는 계속 열립니다"),
+        ]
+        for name, level, title, lead, tone, site in rows:
+            with self.subTest(name):
+                page = status.render(late_with(level))
+                self.assertIn(stale_note("관리 화면", "AI 고치기", "게시"), text(page))
+                self.assertEqual(hl(page), title)
+                self.assertIn(lead, text(re.search(r'<p class="lead">.*?</p>', page).group(0)))
+                card = re.search(r'<section class="card site-card (is-\w+)".*?</section>', page)
+                self.assertEqual((card.group(1), site in text(card.group(0))), (tone, True))
+                self.assertIn("지금 안내", text(page))
+        # 가장 나쁜 상태가 공지 없이 잰 값이면 그대로 흐린다. 손님 칸은 손님 사이트 공지를 따라 단정한다.
+        page = status.render(play([(at(12, 0), DOWN), (at(12, 10), UNK, notice("slow", at(12, 5), None, ("sites",)))]
+                                  + unk(at(12, 10), 80)))
+        self.assertEqual(hl(page), "관리 화면, AI 고치기, 게시가 마지막 확인 때 멈춰 있었습니다")
+        self.assertIn("손님 홈페이지가 잠시 불편할 수 있습니다", page)
+        page = status.render(play([(at(12, 0), {"site": "down"}), (at(12, 10), {"site": "unknown", **UNK},
+                                   notice("ok", at(12, 5), None, ("ai",)))]
+                                  + [(at(12, 10) + timedelta(minutes=m), {"site": "unknown"}) for m in range(10, 81, 10)]))
+        self.assertEqual(hl(page), "손님 사이트가 마지막 확인 때 멈춰 있었습니다")
+        self.assertIn("손님 홈페이지가 마지막 확인 때 열리지 않았습니다", page)
+
     def test_no_note_while_measured_inside_heartbeat(self):
-        # 다 잰 판인데 55분 안이라 안 쓴 경우. 디스크 문서의 기능 시각은 문서 시각과 같아 안내가 안 뜬다.
+        # 다 잰 판인데 50분 안이라 안 쓴 경우. 디스크 문서의 기능 시각은 문서 시각과 같아 안내가 안 뜬다.
         doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
-        _, write = status.apply(doc, ALL_OK, at(12, 50))
+        _, write = status.apply(doc, ALL_OK, at(12, 40))
         self.assertFalse(write)
-        self.assertNotIn(STALE_NOTE, text(status.render(doc, at(12, 50))))
+        self.assertNotIn(STALE_NOTE, text(status.render(doc, at(12, 40))))
 
     def test_never_measured_has_no_time(self):
         doc = fresh()
@@ -415,6 +466,10 @@ class StaleNoteTest(unittest.TestCase):
         page = text(status.render(doc))
         self.assertNotIn("마지막 확인", page)
         self.assertNotIn(STALE_NOTE, page)
+        # 처음 재진 판은 새로 써서 그 시각을 남긴다.
+        doc, write = status.apply(doc, ALL_OK, at(13, 20))
+        self.assertTrue(write)
+        self.assertEqual(comp_of(doc, "admin")["checked_at"], I(at(13, 20)))
 
 
 class HeadlineTest(unittest.TestCase):

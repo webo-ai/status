@@ -37,8 +37,10 @@ HEARTBEAT = timedelta(minutes=55)
 # 앞 실패가 이보다 오래면 다음 실패를 잇지 않고 1부터 센다.
 STREAK_GAP = timedelta(minutes=30)
 # 마지막 확인이 이보다 오래된 기능이 있으면 첫 화면에 안내를 띄운다.
-# 상태가 그대로면 파일이 55분마다만 써져서 저장된 확인 시각이 그만큼 이를 수 있다. 그보다 커야 거짓 안내가 안 뜬다.
 STALE = timedelta(minutes=70)
+# 이번 판에 잰 기능의 저장된 확인 시각이 이만큼 이르면 새로 써서 따라오게 한다. 안 쓴 판의 확인은 디스크에
+# 안 남아, 이 값이 작을수록 안내가 실제로 못 잰 시간에 가깝고 커밋은 잦아진다.
+REFRESH = timedelta(minutes=50)
 HISTORY_DAYS = 30
 INCIDENT_DAYS = 90
 KEEP_INCIDENTS = 100
@@ -190,7 +192,7 @@ def paint(history: dict, comp_id: str, start: datetime, today, level: str, cutof
 
 
 def significant(doc: dict) -> dict:
-    # 시각만 바뀐 것은 새로 쓸 까닭이 아니다. 기능별 확인 시각도 55분 간격으로만 따라 적힌다.
+    # 시각만 바뀐 것은 새로 쓸 까닭이 아니다. 기능별 확인 시각은 apply의 refresh 기준으로 따로 따라 적는다.
     out = copy.deepcopy(doc)
     out.pop("checked_at", None)
     for comp in out.get("components", []):
@@ -213,6 +215,7 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     last = parse(doc.get("checked_at"))
     # 기능이 든 공지가 걸리거나 풀린 판은 다른 값이 그대로여도 새로 써야 칸과 띠가 따라온다.
     notice_moved = False
+    refresh = False
     for comp in new["components"]:
         comp.setdefault("streak", 0)
         comp.setdefault("streak_since", None)
@@ -231,6 +234,11 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
         # 못 잰 판은 이 기능에 없던 판이다. 상태·시각·셈·띠를 하나도 안 바꾼다.
         if result == "unknown":
             continue
+        # 저장된 시각이 문서 시각보다 이르면 지난 쓴 판에 못 잰 기능이고, 오래됐으면 안내 기준에 가깝다.
+        # 둘 다 이번 판에 새로 써야 다음에 못 잰 판이 와도 안내가 실제로 못 잰 시간을 따른다.
+        seen = parse(comp.get("checked_at"))
+        if seen is None or (last and seen < last) or now - seen >= REFRESH:
+            refresh = True
         comp["checked_at"] = stamp
         if comp["state"] != result:
             comp["state"], comp["since"] = result, stamp
@@ -295,7 +303,7 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     changed = significant(new) != significant(doc)
     beat = last is None or now - last >= HEARTBEAT
     # 오래 못 잰 안내가 뜨거나 지는 판도 새로 써야 첫 화면이 따라온다.
-    return new, changed or beat or notice_moved or stale_ids(new, now) != stale_ids(doc, last or now)
+    return new, changed or beat or notice_moved or refresh or stale_ids(new, now) != stale_ids(doc, last or now)
 
 
 # ---------- 그리기 ----------
@@ -371,10 +379,14 @@ def name_list(comps: list[dict], with_final: str = "", without_final: str = "") 
 
 
 def headline(doc: dict, states: dict[str, str], ref: datetime, unsure: bool) -> tuple[str, str, str, bool]:
-    """(등급, 제목 HTML, 안내 글, 공지 제목·본문을 썼는지). unsure면 오래 못 잰 기능이 있어 단정하지 않는다."""
+    """(등급, 제목 HTML, 안내 글, 공지 제목·본문을 썼는지). unsure면 오래 못 잰 기능이 있어 단정하지 않는다.
+    가장 나쁜 상태를 만든 기능에 공지가 걸렸으면 사람이 건 안내라 '지금 안내' 칸과 맞게 단정한다."""
     worst = max(states.values(), key=RANK.__getitem__)
     hit_comps = [c for c in doc["components"] if states[c["id"]] == worst]
     ga = name_list(hit_comps, "이", "가")
+    # 다 정상인 판은 모든 기능이 제목을 만들어서 정상 공지 하나로 단정하지 않는다.
+    if worst != "ok" and any(notice_level(doc, c, ref) for c in hit_comps):
+        unsure = False
     if worst == "ok":
         if unsure:
             return (worst, "마지막 확인 때 모든 서비스가 정상이었습니다",
@@ -557,6 +569,9 @@ def render(doc: dict, ref: datetime | None = None) -> str:
     ref = ref or parse(doc["checked_at"])
     states = {c["id"]: shown(doc, c, ref) for c in doc["components"]}
     late_comps = [c for c in doc["components"] if stale(doc, c, ref)]
+    # 손님 사이트에 공지가 걸렸으면 손님 칸은 사람이 건 안내를 따라 단정한다.
+    site_unsure = bool(late_comps) and not any(
+        notice_level(doc, c, ref) for c in doc["components"] if c["id"] == "sites")
     worst, title, lead, repeated = headline(doc, states, ref, bool(late_comps))
     css_ver = hashlib.sha256(CSS.read_bytes()).hexdigest()[:10]
     mail = doc["contact"]
@@ -604,7 +619,7 @@ def render(doc: dict, ref: datetime | None = None) -> str:
   </section>
   <div class="grid">
     <div class="col-side">
-      {site_card(states, bool(late_comps))}
+      {site_card(states, site_unsure)}
       {notice_html(doc, ref, repeated)}
       <section class="card help" aria-labelledby="h-help">
         <h2 id="h-help">안 될 때는 이렇게 해 주세요</h2>
