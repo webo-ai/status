@@ -287,6 +287,15 @@ main:focus {
 .hl .nm {
   white-space: nowrap;
 }
+/* "다시 확인하고 있습니다"도 한 덩어리로 둔다. 320 폭은 한 줄에 안 들어 넘치므로 그때만 풀어 준다 */
+.hl .nw {
+  white-space: nowrap;
+}
+@media (max-width: 359.98px) {
+  .hl .nw {
+    white-space: normal;
+  }
+}
 .lead {
   margin-top: 8px;
   color: var(--text);

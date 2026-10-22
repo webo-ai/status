@@ -34,6 +34,8 @@ TRIES = 3
 RETRY_GAP_S = 5.0
 # 상태가 그대로면 이 간격마다만 확인 시각을 새로 적는다. 커밋이 10분마다 쌓이지 않게 하려는 값이다.
 HEARTBEAT = timedelta(minutes=55)
+# 첫 실패 뒤 못 잰 판을 건너뛰며 기다리는 상한. 이보다 오래된 첫 실패에는 다음 실패를 잇지 않는다.
+STREAK_GAP = timedelta(minutes=30)
 HISTORY_DAYS = 30
 INCIDENT_DAYS = 90
 KEEP_INCIDENTS = 100
@@ -159,6 +161,11 @@ def shown(doc: dict, comp: dict, ref: datetime) -> str:
     return comp["state"]
 
 
+def unconfirmed(doc: dict, comp: dict) -> bool:
+    """이번 판에 못 재서 칸 값이 앞서 센 값인지. 기능 시각은 센 판에만 문서 시각과 같이 적힌다."""
+    return bool(comp.get("pending")) and comp.get("checked_at") != doc.get("checked_at")
+
+
 def round_result(seen: list[str]) -> tuple[str, str | None]:
     """기능 하나의 이번 판 결과(ok·slow·down·unknown)와 못 잰 정도(None·"some"·"all")."""
     known = [s for s in seen if s != "unknown"]
@@ -200,6 +207,9 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     history = new.setdefault("history", {})
     incidents = new.setdefault("incidents", [])
     was_failing: dict[str, bool] = {}
+    last = parse(doc.get("checked_at"))
+    # 공지가 걸리거나 풀린 판은 다른 값이 그대로여도 새로 써야 칸과 띠가 따라온다.
+    notice_moved = False
     for comp in new["components"]:
         checks = comp["check"] if isinstance(comp["check"], list) else [comp["check"]]
         result, missed = round_result([results.get(c, "unknown") for c in checks])
@@ -207,21 +217,28 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
             comp["pending"] = missed
         else:
             comp.pop("pending", None)
-        # 기능 시각과 상태는 실제로 잰 판에만 바꾼다. 못 잰 판은 마지막으로 잰 값을 그대로 둔다.
-        if result != "unknown":
+        level = notice_level(new, comp, now)
+        if last is None or notice_level(doc, comp, last) != level:
+            notice_moved = True
+        # 기능 시각과 상태는 공지 없이 잰 판(센 판)에만 바꾼다. 공지 중에 잰 값과 못 잰 판은 쓰지 않는다.
+        if result != "unknown" and not level:
             comp["checked_at"] = stamp
             if comp["state"] != result:
                 comp["state"] = result
                 comp["since"] = stamp
         was_failing[comp["id"]] = comp.get("failing", False)
-        level = notice_level(new, comp, now)
         if level:
             # 공지가 걸린 판은 세지 않고, 이어지던 실패 수도 0으로 되돌린다.
             comp["streak"], comp["streak_since"] = 0, None
             if level in ("down", "maintenance"):
                 start = parse(new["notice"].get("starts_at")) or now
                 paint(history, comp["id"], start, today, level, cutoff)
+            elif result in ("ok", "slow"):
+                paint(history, comp["id"], now, today, "ok", cutoff)
         elif result == "down":
+            first = parse(comp.get("streak_since"))
+            if comp.get("streak") == 1 and first and now - first > STREAK_GAP:
+                comp["streak"] = 0
             if not comp.get("streak"):
                 comp["streak_since"] = stamp
             # 두 번이면 기록을 연다. 오래 멈춰도 수가 판마다 바뀌어 파일을 새로 쓰지 않게 2에서 멈춘다.
@@ -239,13 +256,19 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     members = set(open_auto["components"]) if open_auto else set()
     joined = [c for c in new["components"] if c["streak"] >= 2 and c["id"] not in members]
     if joined:
+        started = min(parse(c["streak_since"]) for c in joined)
+        inc_id = started.astimezone(KST).strftime("%Y%m%d-%H%M")
+        if not open_auto:
+            # 사람이 닫은 같은 첫 실패의 기록이 있으면 새로 열지 않고 다시 연다. id가 두 벌로 겹치지 않게 한다.
+            open_auto = next((i for i in incidents if i.get("id") == inc_id), None)
+            if open_auto:
+                open_auto["auto"], open_auto["resolved_at"] = True, None
         if open_auto:
-            merged = members | {c["id"] for c in joined}
+            merged = set(open_auto.get("components", [])) | {c["id"] for c in joined}
             open_auto["components"] = [c["id"] for c in new["components"] if c["id"] in merged]
         else:
-            started = min(parse(c["streak_since"]) for c in joined)
             open_auto = {
-                "id": started.astimezone(KST).strftime("%Y%m%d-%H%M"),
+                "id": inc_id,
                 "auto": True,
                 "level": "down",
                 "title": "·".join(c["name"] for c in joined) + " 장애",
@@ -271,9 +294,8 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
 
     new["checked_at"] = stamp
     changed = significant(new) != significant(doc)
-    last = parse(doc.get("checked_at"))
     stale = last is None or now - last >= HEARTBEAT
-    return new, changed or stale
+    return new, changed or stale or notice_moved
 
 
 # ---------- 그리기 ----------
@@ -339,7 +361,7 @@ LOGO = (
 )
 
 
-def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
+def headline(doc: dict, states: dict[str, str], ref: datetime) -> tuple[str, str, str]:
     """(등급, 제목 HTML, 안내 글). 제목의 기능 이름은 한 덩어리로 감싸 두 줄로 갈리지 않게 한다."""
     names = {c["id"]: c["name"] for c in doc["components"]}
     worst = max(states.values(), key=SHOW_RANK.__getitem__)
@@ -352,7 +374,7 @@ def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
     if worst == "checking":
         return (
             worst,
-            hit + " 상태를 다시 확인하고 있습니다",
+            hit + ' 상태를 <span class="nw">다시 확인하고 있습니다</span>',
             "자동 확인이 잠시 되지 않았습니다. 멈췄다는 뜻은 아니며, 확인되는 대로 이 페이지에 알려 드립니다.",
         )
     if worst == "slow":
@@ -364,6 +386,14 @@ def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
     if worst == "maintenance":
         body = (doc.get("notice") or {}).get("body") or "점검이 끝나면 바로 다시 쓰실 수 있습니다."
         return worst, hit + " 점검 중입니다", body
+    hit_comps = [c for c in doc["components"] if states[c["id"]] == "down"]
+    # 멈춘 칸이 다 이번 판에 못 잰 칸이면 지금 멈췄다고 단정하지 않는다. 장애 공지는 사람이 적은 단정이다.
+    if all(unconfirmed(doc, c) and not notice_level(doc, c, ref) for c in hit_comps):
+        return (
+            worst,
+            hit + ga + " 마지막 확인 때 멈춰 있었습니다",
+            "이번 자동 확인이 되지 않아 지금도 멈춰 있는지는 아직 모릅니다. 확인되는 대로 이 페이지에 알려 드립니다.",
+        )
     return (
         worst,
         hit + ga + " 지금 멈춰 있습니다",
@@ -376,8 +406,8 @@ APART = "이미 게시한 매장 홈페이지는 관리 화면과 따로 운영�
 SITE_CARD = {
     "ok": ("calm", "손님 홈페이지는 계속 열립니다", [
         APART, "관리 화면이나 AI 고치기가 멈춰도 손님은 홈페이지를 그대로 볼 수 있습니다."]),
-    "checking": ("neutral", "손님 홈페이지가 열리는지 다시 확인하고 있습니다", [
-        "자동 확인이 잠시 되지 않았습니다. 확인되는 대로 이 페이지에 알려 드립니다.", APART]),
+    # 확인이 안 됐다는 말은 첫 화면 안내와 기능 칸에 이미 있어 여기선 되풀이하지 않는다.
+    "checking": ("neutral", "손님 홈페이지가 열리는지 다시 확인하고 있습니다", [APART]),
     "slow": ("neutral", "손님 홈페이지가 평소보다 느리게 열릴 수 있습니다", [
         "열리기는 하지만 평소보다 오래 걸릴 수 있습니다.", APART]),
     "maintenance": ("neutral", "손님 홈페이지가 점검으로 잠시 열리지 않을 수 있습니다", [
@@ -412,6 +442,8 @@ def strip(doc: dict, comp_id: str, ref: datetime) -> str:
     for back in range(HISTORY_DAYS - 1, -1, -1):
         day = today - timedelta(days=back)
         state = history.get(day.isoformat(), {}).get(comp_id)
+        # 예전 판이나 손으로 적은 느림 칸은 정상으로 읽는다. 띠에는 느림 색이 없다.
+        state = "ok" if state == "slow" else state
         tip = f"{day.month}월 {day.day}일 "
         if state:
             recorded += 1
@@ -485,7 +517,7 @@ def incidents_html(doc: dict, ref: datetime) -> str:
             f'<li class="inc"><div class="inc-top"><h3>{esc(inc["title"])}</h3>{badge}</div>'
             f'<p class="meta"><time datetime="{esc(inc["started_at"])}">{esc(period)}</time>'
             f" · 영향 받은 곳: {esc(affected)}</p>"
-            f'<p>{esc(inc.get("summary", ""))}</p></li>'
+            f'<p>{esc(inc.get("summary") or "")}</p></li>'
         )
     if not items:
         return f'<p class="empty">최근 {INCIDENT_DAYS}일 동안 기록된 장애가 없습니다.</p>'
@@ -513,18 +545,25 @@ def notice_html(doc: dict, ref: datetime) -> str:
     return (
         f'<section class="card notice" aria-labelledby="h-notice"><p class="eyebrow">{tag}</p>'
         f'<h2 id="h-notice">{esc(notice["title"])}</h2>{meta_html}'
-        f'<p>{esc(notice.get("body", ""))}</p></section>'
+        f'<p>{esc(notice.get("body") or "")}</p></section>'
     )
 
 
-def render(doc: dict) -> str:
-    ref = parse(doc["checked_at"])
+def mail_html(mail: str) -> str:
+    """좁은 칸에서 @ 뒤가 먼저 줄을 바꾸게 한다."""
+    local, at, domain = mail.partition("@")
+    return esc(local) + (esc(at) + "<wbr>" if at else "") + esc(domain)
+
+
+def render(doc: dict, ref: datetime | None = None) -> str:
+    """ref는 공지가 걸렸는지와 오늘이 언제인지 보는 기준 시각이다. 없으면 문서 시각을 쓴다."""
+    ref = ref or parse(doc["checked_at"])
     states = {c["id"]: shown(doc, c, ref) for c in doc["components"]}
-    worst, title, lead = headline(doc, states)
+    worst, title, lead = headline(doc, states, ref)
     css_ver = hashlib.sha256(CSS.read_bytes()).hexdigest()[:10]
     mail = doc["contact"]
     mailto = "mailto:" + mail + "?subject=" + urllib.parse.quote("[웹오 문의] ")
-    checked = when(ref)
+    checked = when(parse(doc["checked_at"]))
     hero_list = "".join(
         f'<li class="is-{states[c["id"]]}"><span>{esc(c["name"])}</span> '
         f'<b class="state is-{states[c["id"]]}">{icon(states[c["id"]], "ic ic-sm")}'
@@ -575,13 +614,13 @@ def render(doc: dict) -> str:
       <section class="card contact" aria-labelledby="h-contact">
         <h2 id="h-contact">계속 안 되면 알려 주세요</h2>
         <p>매장 이름과 어떤 화면이 안 되는지 적어 주시면 빨리 확인합니다.</p>
-        <a class="mail-link" href="{esc(mailto)}">{icon("mail", "ic")}<span>{esc(mail)}</span>{icon("arrow", "ic ic-sm")}</a>
+        <a class="mail-link" href="{esc(mailto)}">{icon("mail", "ic")}<span>{mail_html(mail)}</span>{icon("arrow", "ic ic-sm")}</a>
       </section>
     </div>
     <div class="col-main">
       <section class="card c-comps" aria-labelledby="h-comps">
         <div class="sec-head"><h2 id="h-comps">기능별 상태</h2>
-        <p class="sub">칸 하나가 하루입니다. 20분 넘게 멈춘 날만 장애로 칠합니다.</p></div>
+        <p class="sub">칸 하나가 하루입니다. 잇달아 두 번 멈춘 날과 장애 안내가 있던 날을 장애로 칠합니다.</p></div>
         <ul class="comps">{components_html(doc, states, ref)}</ul>
         <ul class="legend" aria-label="색 설명">
           <li><span class="d is-ok"></span>정상</li>
@@ -640,6 +679,11 @@ def check_text(where: str, value: object) -> None:
         raise StatusFileError(f"{where}이 비어 있습니다. 화면에 보일 제목을 글자로 적어 주세요.")
 
 
+def check_body(where: str, value: object) -> None:
+    if value is not None and not isinstance(value, str):
+        raise StatusFileError(f'{where}는 "..."처럼 따옴표로 감싼 글자로 적거나, 쓸 말이 없으면 지워 주세요.')
+
+
 def check_ids(where: str, value: object, known: list[str]) -> None:
     if not isinstance(value, list):
         raise StatusFileError(f'{where}는 ["admin", "ai"]처럼 대괄호 목록으로 적어 주세요.')
@@ -667,20 +711,30 @@ def validate(doc: dict) -> None:
         if not isinstance(notice, dict):
             raise StatusFileError('notice는 { }로 감싼 묶음으로 적고, 공지가 없으면 null로 적어 주세요.')
         check_text("notice.title", notice.get("title"))
+        check_body("notice.body", notice.get("body"))
         check_ids("notice.components", notice.get("components", []), known)
         check_level("notice.level", notice.get("level"))
         check_time("notice.starts_at", notice.get("starts_at"), required=False)
         check_time("notice.ends_at", notice.get("ends_at"), required=False)
-    for n, inc in enumerate(doc.get("incidents", [])):
+    incidents = doc.get("incidents", [])
+    if not isinstance(incidents, list):
+        raise StatusFileError("incidents는 [ ]로 감싼 목록으로 적고, 기록이 없으면 []로 적어 주세요.")
+    for n, inc in enumerate(incidents):
         if not isinstance(inc, dict):
             raise StatusFileError(f"incidents[{n}]는 {{ }}로 감싼 묶음으로 적어 주세요.")
         at = f"incidents[{n}]({inc.get('id', '?')})"
         check_text(f"{at}.title", inc.get("title"))
+        check_body(f"{at}.summary", inc.get("summary"))
         check_ids(f"{at}.components", inc.get("components", []), known)
         check_level(f"{at}.level", inc.get("level", "down"))
         check_time(f"{at}.started_at", inc.get("started_at"))
         check_time(f"{at}.resolved_at", inc.get("resolved_at"), required=False)
-    for day, record in doc.get("history", {}).items():
+    history = doc.get("history", {})
+    if not isinstance(history, dict):
+        raise StatusFileError("history는 { }로 감싼 묶음으로 적고, 기록이 없으면 {}로 적어 주세요.")
+    for day, record in history.items():
+        if not isinstance(record, dict):
+            raise StatusFileError(f'history.{day}는 {{"admin": "ok"}}처럼 묶음으로 적어 주세요.')
         for comp_id, state in record.items():
             check_level(f"history.{day}.{comp_id}", state)
 
@@ -700,8 +754,12 @@ def save(doc: dict) -> None:
     )
 
 
-def write_index(doc: dict) -> None:
-    INDEX.write_text(render(doc), encoding="utf-8", newline="\n")
+def write_index(doc: dict, ref: datetime | None = None) -> None:
+    INDEX.write_text(render(doc, ref), encoding="utf-8", newline="\n")
+
+
+def clock() -> datetime:
+    return datetime.now(KST)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -713,14 +771,16 @@ def main(argv: list[str] | None = None) -> int:
     except StatusFileError as err:
         print(f"status.json을 고쳐야 합니다. {err}", file=sys.stderr)
         return 2
+    now = clock()
     if args.command == "run":
-        new, write = apply(doc, measure(doc), datetime.now(KST))
+        new, write = apply(doc, measure(doc), now)
         if write:
             save(new)
             doc = new
         else:
             print("상태가 그대로라 파일을 새로 쓰지 않습니다.", file=sys.stderr)
-    write_index(doc)
+    # 손으로 공지를 넣고 그리기만 돌려도 공지가 걸렸는지는 지금 시각으로 본다.
+    write_index(doc, now)
     return 0
 
 

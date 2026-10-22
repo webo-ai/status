@@ -166,12 +166,48 @@ SCENARIOS = [
     ("느림 공지 중 down 뒤 못 잼", "ai",
      [(at(12, 0), DOWN, notice("slow", at(11, 55), None, ("ai",))), (at(12, 10), UNK)],
      [], {}, ("느림", None)),
-    ("느림 공지가 끝난 뒤 못 잼 (상태 말은 마지막으로 잰 값)", "ai",
+    # 4차 규칙 4. 공지 중에 잰 down은 칸 값이 아니라서, 센 값이 없는 칸은 확인 중이다.
+    ("느림 공지가 끝난 뒤 못 잼 (상태 말은 마지막으로 센 값)", "ai",
      [(at(12, 0), DOWN, notice("slow", at(11, 55), at(12, 5), ("ai",))), (at(12, 10), UNK)],
-     [], {}, ("장애", "이번 확인이 되지 않았습니다. " + LAST_12 + "멈춰 있었습니다.")),
+     [], {}, ("확인 중", "이번 확인이 되지 않았습니다. 아직 확인한 기록이 없습니다.")),
     ("점검 공지 중 못 잰 판", "ai",
      [(at(12, 0), {}), (at(12, 10), UNK, notice("maintenance", at(12, 5), at(13, 0)))],
      [], {"10/22": "점검"}, ("점검", None)),
+    ("공지 중에 잰 down은 공지 뒤 못 잰 칸의 값으로 안 쓴다", "ai",
+     [(at(12, 0), {}), (at(12, 10), DOWN, notice("maintenance", at(12, 5), at(12, 25))),
+      (at(12, 20), DOWN), (at(12, 30), UNK)],
+     [], {"10/22": "점검"}, ("확인 중", "이번 확인이 되지 않았습니다. " + LAST_12 + "정상이었습니다.")),
+    ("공지 끝 시각에 잰 판은 공지 밖으로 센다", "ai",
+     [(at(12, 0), DOWN, notice("maintenance", at(11, 30), at(12, 10))), (at(12, 10), DOWN), (at(12, 20), DOWN)],
+     [(I(at(12, 10)), None)], {"10/22": "장애"}, ("장애", None)),
+    # 4차 규칙 2. 첫 실패 뒤 못 잰 판을 건너뛰는 건 30분까지다.
+    ("첫 실패 뒤 꼭 30분에 다시 down이면 잇는다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), UNK), (at(12, 20), UNK), (at(12, 30), DOWN)],
+     [(I(at(12, 0)), None)], {"10/22": "장애"}, ("장애", None)),
+    ("첫 실패 뒤 40분에 down이면 1부터 다시 센다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), UNK), (at(12, 20), UNK), (at(12, 30), UNK), (at(12, 40), DOWN)],
+     [], {}, ("장애", None)),
+    ("다시 센 첫 실패에서 시작한다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), UNK), (at(12, 20), UNK), (at(12, 30), UNK), (at(12, 40), DOWN),
+      (at(12, 50), DOWN)],
+     [(I(at(12, 40)), None)], {"10/22": "장애"}, ("장애", None)),
+    ("기록이 열린 뒤엔 오래 못 재도 다시 세지 않는다", "ai",
+     [(at(12, 0), DOWN), (at(12, 10), DOWN), (at(12, 20), UNK), (at(12, 30), UNK), (at(12, 40), UNK),
+      (at(12, 50), DOWN)],
+     [(I(at(12, 0)), None)], {"10/22": "장애"}, ("장애", None)),
+    # 4차 규칙 7. 느림·정상 공지 중에 잰 ok·slow는 정상으로 칠한다.
+    ("느림 공지 중 잰 ok는 정상으로 칠한다", "ai",
+     [(at(12, 0), {}, notice("slow", at(11, 55), None, ("ai",)))],
+     [], {"10/22": "정상"}, ("느림", None)),
+    ("느림 공지 중 잰 slow도 정상으로 칠한다", "ai",
+     [(at(12, 0), {"api": "slow"}, notice("slow", at(11, 55), None, ("ai",)))],
+     [], {"10/22": "정상"}, ("느림", None)),
+    ("정상 공지 중 잰 slow는 정상으로 칠한다", "ai",
+     [(at(12, 0), {"api": "slow"}, notice("ok", at(11, 55), None, ("ai",)))],
+     [], {"10/22": "정상"}, ("정상", None)),
+    ("느림 공지 중 잰 down은 칠하지 않는다", "ai",
+     [(at(12, 0), DOWN, notice("slow", at(11, 55), None, ("ai",))), (at(12, 10), DOWN)],
+     [], {}, ("느림", None)),
 ]
 
 
@@ -224,9 +260,122 @@ class ScenarioTest(unittest.TestCase):
     # 규칙 7·10. 띠 설명과 첫 화면 시각 이름.
     def test_page_words(self):
         page = text(status.render(play([(at(12, 0), {})])))
-        self.assertIn("20분 넘게 멈춘 날만 장애로 칠합니다", page)
+        self.assertIn("잇달아 두 번 멈춘 날과 장애 안내가 있던 날을 장애로 칠합니다.", page)
         self.assertIn("이 페이지를 마지막으로 바꾼 때", page)
         self.assertNotIn("페이지를 고친 때", page)
+
+
+def hl(page: str) -> str:
+    return text(re.search(r'<span class="hl">(.*?)</span></h1>', page).group(1))
+
+
+class FourthRoundTest(unittest.TestCase):
+    # 4차 1. 공지가 걸리거나 풀린 판은 등급과 상관없이 새로 쓴다.
+    def test_notice_start_and_end_rewrite_file(self):
+        for level in ("ok", "slow", "maintenance", "down"):
+            with self.subTest(level):
+                doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
+                doc["notice"] = notice(level, at(12, 5), at(12, 25), ("ai",))
+                doc, write = status.apply(doc, ALL_OK, at(12, 10))
+                self.assertTrue(write, "공지가 걸린 판")
+                doc, write = status.apply(doc, ALL_OK, at(12, 20))
+                self.assertFalse(write, "공지가 그대로인 판")
+                doc, write = status.apply(doc, ALL_OK, at(12, 30))
+                self.assertTrue(write, "공지가 풀린 판")
+                self.assertNotIn("점검 중입니다", status.render(doc))
+                _, write = status.apply(doc, ALL_OK, at(12, 40))
+                self.assertFalse(write)
+
+    # 4차 2. 그리기만 돌릴 때도 공지가 걸렸는지는 지금 시각으로 본다.
+    def test_render_command_uses_current_time(self):
+        rows = [
+            (notice("maintenance", at(12, 5), at(13, 0)), "지금 안내", "예정된 안내"),
+            (notice("maintenance", at(11, 0), at(12, 5)), "모든 서비스가 정상입니다", "점검 중입니다"),
+        ]
+        for item, want, unwanted in rows:
+            with self.subTest(want), tempfile.TemporaryDirectory() as tmp:
+                doc = fresh()
+                doc["notice"] = item
+                path, index = Path(tmp) / "status.json", Path(tmp) / "index.html"
+                path.write_text(json.dumps(doc, ensure_ascii=False), "utf-8")
+                with mock.patch.object(status, "STATUS", path), mock.patch.object(status, "INDEX", index), \
+                        mock.patch.object(status, "clock", return_value=at(12, 6)):
+                    self.assertEqual(status.main(["render"]), 0)
+                page = index.read_text("utf-8")
+                self.assertIn(want, page)
+                self.assertNotIn(unwanted, page)
+
+    # 4차 3. 보이는 장애 칸이 다 이번 판에 못 잰 칸이면 첫 화면 제목에서 단정을 뺀다.
+    def test_headline_does_not_assert_unconfirmed_down(self):
+        both_unk = {"app": "unknown", "api": "unknown"}
+        doc = play([(at(12, 0), DOWN), (at(12, 10), DOWN), (at(12, 20), both_unk)])
+        self.assertEqual(hl(status.render(doc)), "관리 화면, AI 고치기, 게시가 마지막 확인 때 멈춰 있었습니다")
+        self.assertNotIn("지금 멈춰 있습니다", status.render(doc))
+        # 하나라도 이번 판에 멈춘 게 재지면 단정한다.
+        doc = play([(at(12, 0), DOWN), (at(12, 10), DOWN), (at(12, 20), {"app": "down", "api": "unknown"})])
+        self.assertIn("지금 멈춰 있습니다", hl(status.render(doc)))
+        # 장애 공지는 사람이 적은 단정이라 못 잰 판에도 단정한다.
+        doc = play([(at(12, 0), {}), (at(12, 10), UNK, notice("down", at(12, 5), None, ("ai",)))])
+        self.assertEqual(hl(status.render(doc)), "AI 고치기가 지금 멈춰 있습니다")
+
+    # 4차 4. 목록·묶음 꼴과 글자 칸을 보고, 비었으면 빈 글로 그린다.
+    def test_validate_shapes_and_empty_text(self):
+        inc = {"id": "x", "level": "down", "title": "t", "components": ["admin"],
+               "started_at": status.iso(T0), "resolved_at": None}
+        rows = [
+            ({"incidents": {"x": inc}}, r"^incidents는.*목록"),
+            ({"history": []}, r"^history는"),
+            ({"history": {"2026-10-22": "ok"}}, r"history\.2026-10-22는"),
+            ({"notice": {"level": "maintenance", "title": "점검", "body": 3, "components": []}}, r"notice\.body"),
+            ({"incidents": [dict(inc, summary=["a"])]}, r"incidents\[0\]\(x\)\.summary"),
+        ]
+        for change, pattern in rows:
+            with self.subTest(pattern):
+                doc = fresh()
+                doc.update(change)
+                with self.assertRaisesRegex(status.StatusFileError, pattern):
+                    status.validate(doc)
+        doc = fresh()
+        doc["notice"] = dict(notice("slow", at(11, 0), None, ("ai",)), body=None)
+        doc["incidents"] = [dict(inc, summary=None)]
+        status.validate(doc)
+        page = status.render(doc)
+        self.assertNotIn("None", page)
+        self.assertIn('<p></p></section>', page)
+        # 띠의 느림 칸은 정상으로 읽는다.
+        doc = fresh()
+        doc["history"] = {"2026-10-22": {"admin": "slow"}}
+        status.validate(doc)
+        self.assertEqual(strip_cells(doc, "admin"), {"10/22": "정상"})
+
+    # 4차 5. 사람이 닫은 같은 id 기록은 새로 열지 않고 다시 연다.
+    def test_closed_by_hand_reopens_same_record(self):
+        doc = play([(at(12, 0), DOWN), (at(12, 10), DOWN)])
+        doc["incidents"][0]["resolved_at"] = I(at(12, 15))
+        doc["incidents"][0]["title"] = "AI 회사 응답 지연"
+        doc = play([(at(12, 20), DOWN)], doc)
+        self.assertEqual([i["id"] for i in doc["incidents"]], ["20261022-1200"])
+        self.assertIsNone(doc["incidents"][0]["resolved_at"])
+        self.assertEqual(doc["incidents"][0]["title"], "AI 회사 응답 지연")
+        doc = play([(at(12, 30), {})], doc)
+        self.assertEqual(doc["incidents"][0]["resolved_at"], I(at(12, 30)))
+        # 지운 뒤엔 같은 id로 하나만 다시 연다.
+        doc = play([(at(12, 0), DOWN), (at(12, 10), DOWN)])
+        doc["incidents"] = []
+        doc = play([(at(12, 20), DOWN), (at(12, 30), DOWN)], doc)
+        self.assertEqual([i["id"] for i in doc["incidents"]], ["20261022-1200"])
+
+    # 4차 6. 메일 주소는 @ 뒤에서 먼저 줄을 바꾼다.
+    def test_mail_breaks_after_at(self):
+        self.assertIn("<span>webomni.team@<wbr>gmail.com</span>", status.render(fresh()))
+
+    # 4차 7. 손님 사이트만 확인 중이면 제목 끝을 한 덩어리로 묶고 같은 말을 되풀이하지 않는다.
+    def test_site_checking_words(self):
+        page = status.render(play([(at(12, 0), {}), (at(12, 10), {"site": "unknown"})]))
+        self.assertIn('상태를 <span class="nw">다시 확인하고 있습니다</span>', page)
+        self.assertEqual(text(page).count("자동 확인이 잠시 되지 않았습니다"), 1)
+        card = re.search(r'<section class="card site-card.*?</section>', page).group(0)
+        self.assertNotIn("확인이", text(card).replace("확인하고", ""))
 
 
 class ApplyTest(unittest.TestCase):
