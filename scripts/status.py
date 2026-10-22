@@ -380,12 +380,13 @@ def name_list(comps: list[dict], with_final: str = "", without_final: str = "") 
 
 def headline(doc: dict, states: dict[str, str], ref: datetime, unsure: bool) -> tuple[str, str, str, bool]:
     """(등급, 제목 HTML, 안내 글, 공지 제목·본문을 썼는지). unsure면 오래 못 잰 기능이 있어 단정하지 않는다.
-    가장 나쁜 상태를 만든 기능에 공지가 걸렸으면 사람이 건 안내라 '지금 안내' 칸과 맞게 단정한다."""
+    가장 나쁜 상태를 만든 기능이 모두 공지가 걸렸으면 사람이 건 안내라 '지금 안내' 칸과 맞게 단정한다."""
     worst = max(states.values(), key=RANK.__getitem__)
     hit_comps = [c for c in doc["components"] if states[c["id"]] == worst]
     ga = name_list(hit_comps, "이", "가")
     # 다 정상인 판은 모든 기능이 제목을 만들어서 정상 공지 하나로 단정하지 않는다.
-    if worst != "ok" and any(notice_level(doc, c, ref) for c in hit_comps):
+    # 공지 없는 기능이 하나라도 섞이면 그 기능은 마지막 값일 뿐이라 흐린 제목으로 둔다.
+    if worst != "ok" and all(notice_level(doc, c, ref) for c in hit_comps):
         unsure = False
     if worst == "ok":
         if unsure:

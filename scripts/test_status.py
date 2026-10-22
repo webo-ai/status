@@ -449,6 +449,12 @@ class StaleNoteTest(unittest.TestCase):
                                   + [(at(12, 10) + timedelta(minutes=m), {"site": "unknown"}) for m in range(10, 81, 10)]))
         self.assertEqual(hl(page), "손님 사이트가 마지막 확인 때 멈춰 있었습니다")
         self.assertIn("손님 홈페이지가 마지막 확인 때 열리지 않았습니다", page)
+        # 공지 걸린 기능과 공지 없이 오래 못 잰 기능이 같이 가장 나쁘면 제목은 흐리고, 손님 칸만 공지대로 단정한다.
+        steps = [(at(12, 0), DOWN),
+                 (at(12, 10), {"api": "unknown", "site": "down"}, notice("down", at(12, 5), None, ("sites",)))]
+        page = status.render(play(steps + [(s[0], {**s[1], "site": "down"}) for s in unk(at(12, 10), 80)]))
+        self.assertEqual(hl(page), "관리 화면, AI 고치기, 게시, 손님 사이트가 마지막 확인 때 멈춰 있었습니다")
+        self.assertIn("손님 홈페이지가 지금 열리지 않습니다", page)
 
     def test_no_note_while_measured_inside_heartbeat(self):
         # 다 잰 판인데 50분 안이라 안 쓴 경우. 디스크 문서의 기능 시각은 문서 시각과 같아 안내가 안 뜬다.
@@ -470,6 +476,14 @@ class StaleNoteTest(unittest.TestCase):
         doc, write = status.apply(doc, ALL_OK, at(13, 20))
         self.assertTrue(write)
         self.assertEqual(comp_of(doc, "admin")["checked_at"], I(at(13, 20)))
+
+    def test_first_measure_rewrites_even_when_nothing_else_changed(self):
+        # 띠도 상태도 그대로인 판에서 확인 시각이 없던 기능을 처음 재면, 그 갈래 하나로 새로 쓴다.
+        doc, _ = status.apply(fresh(), ALL_OK, at(12, 0))
+        comp_of(doc, "admin").pop("checked_at", None)
+        doc, write = status.apply(doc, ALL_OK, at(12, 10))
+        self.assertTrue(write)
+        self.assertEqual(comp_of(doc, "admin")["checked_at"], I(at(12, 10)))
 
 
 class HeadlineTest(unittest.TestCase):
