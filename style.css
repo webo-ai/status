@@ -494,6 +494,11 @@ main:focus {
 .days-cap span:nth-child(2) {
   text-align: center;
 }
+.days-cap span:first-child,
+.days-cap span:last-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -583,7 +588,8 @@ main:focus {
   flex: 1;
   min-width: 0;
   font-size: 15px;
-  overflow-wrap: normal;
+  /* 320 폭에서 메일 주소가 칸 밖으로 나가지 않게 아무 자리에서나 줄을 바꾼다 */
+  overflow-wrap: anywhere;
 }
 .mail-link .ic {
   color: var(--brand);
