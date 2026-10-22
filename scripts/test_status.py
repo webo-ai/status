@@ -146,6 +146,75 @@ class ApplyTest(unittest.TestCase):
         doc, _ = status.apply(doc, {**ALL_OK, "app": "unknown"}, T0 + timedelta(minutes=10))
         self.assertEqual(state_of(doc, "admin"), "down")
 
+    # 2차 1. 한 번 실패한 다음 판을 봇 검사로 못 쟀으면 두 번째 실패로 세지 않는다.
+    def test_down_then_unknown_opens_no_incident(self):
+        doc, _ = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "unknown"}, T0 + timedelta(minutes=10))
+        self.assertEqual(state_of(doc, "ai"), "down")
+        self.assertEqual(doc["incidents"], [])
+        self.assertEqual(doc["history"]["2026-10-22"], {"sites": "ok"})
+        # 그다음 판에 실제로 다시 멈춘 게 재지면 그때 연다.
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, T0 + timedelta(minutes=20))
+        self.assertEqual(len(doc["incidents"]), 1)
+        self.assertEqual(doc["incidents"][0]["started_at"], status.iso(T0))
+
+    # 2차 2. 한 번 실패하고 돌아온 날은 띠에 장애로 적지 않고, 기록이 열리면 처음 멈춘 날까지 거슬러 적는다.
+    def test_single_failure_day_is_not_down_in_history(self):
+        doc, _ = status.apply(fresh(), ALL_OK, T0)
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, T0 + timedelta(minutes=10))
+        doc, _ = status.apply(doc, ALL_OK, T0 + timedelta(minutes=20))
+        self.assertEqual(doc["history"]["2026-10-22"]["ai"], "ok")
+        self.assertEqual(doc["incidents"], [])
+        self.assertNotIn("장애 하루", status.strip(doc, "ai", T0 + timedelta(minutes=20)))
+        # 그날 처음 실패만 있었던 기능은 그날 칸을 비워 둔다.
+        doc = fresh()
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, T0)
+        self.assertNotIn("ai", doc["history"]["2026-10-22"])
+
+    def test_incident_backfills_from_first_stop_day(self):
+        night = datetime(2026, 10, 22, 23, 55, tzinfo=status.KST)
+        doc = fresh()
+        doc["checked_at"] = status.iso(night - timedelta(minutes=10))
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, night)
+        self.assertNotIn("ai", doc["history"]["2026-10-22"])
+        doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, night + timedelta(minutes=10))
+        self.assertEqual(doc["history"]["2026-10-22"]["ai"], "down")
+        self.assertEqual(doc["history"]["2026-10-23"]["ai"], "down")
+        self.assertEqual(doc["incidents"][0]["started_at"], status.iso(night))
+
+    # 2차 4. 배포 직후 첫 판에 못 재면 앞 판의 문서 시각을 기능 시각으로 둔다.
+    def test_first_unknown_uses_document_time(self):
+        doc = fresh()
+        for comp in doc["components"]:
+            comp.pop("checked_at", None)
+        doc, _ = status.apply(doc, {**ALL_OK, "app": "unknown"}, T0 + timedelta(minutes=10))
+        admin = next(c for c in doc["components"] if c["id"] == "admin")
+        self.assertTrue(admin["pending"])
+        self.assertEqual(admin["checked_at"], status.iso(T0))
+
+    # 2차 7. 점검 공지 중에 멈춰 공지 뒤에도 멈춰 있으면 기록은 공지가 끝난 때부터다.
+    def test_incident_after_notice_starts_at_notice_end(self):
+        base = fresh()
+        base["notice"] = {
+            "level": "maintenance", "title": "정기 점검", "body": "점검합니다.",
+            "components": ["admin", "ai", "publish"],
+            "starts_at": status.iso(T0 - timedelta(minutes=30)),
+            "ends_at": status.iso(T0 + timedelta(minutes=25)),
+        }
+        both = {"app": "down", "api": "down", "site": "ok"}
+        doc, _ = status.apply(base, both, T0)
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=10))
+        self.assertEqual(doc["incidents"], [])
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=30))
+        self.assertEqual(len(doc["incidents"]), 1)
+        self.assertEqual(doc["incidents"][0]["started_at"], status.iso(T0 + timedelta(minutes=25)))
+        # 공지 전에 이미 멈춰 있던 게 아니라면 처음 멈춘 때가 늦은 쪽이다.
+        late = fresh()
+        late["notice"] = dict(base["notice"], ends_at=status.iso(T0 - timedelta(minutes=5)))
+        doc, _ = status.apply(late, both, T0)
+        doc, _ = status.apply(doc, both, T0 + timedelta(minutes=10))
+        self.assertEqual(doc["incidents"][0]["started_at"], status.iso(T0))
+
     def test_slow_does_not_open_incident(self):
         doc, write = status.apply(fresh(), {**ALL_OK, "app": "slow"}, T0)
         self.assertTrue(write)

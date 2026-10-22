@@ -144,6 +144,15 @@ def effective(doc: dict, comp: dict, ref: datetime) -> str:
     return comp["state"]
 
 
+def down_start(doc: dict, comp: dict, ref: datetime) -> datetime:
+    """장애 기록의 시작 시각. 처음 멈춘 때로 적되, 점검 공지 중에 멈췄으면 공지가 끝난 때부터다."""
+    started = parse(comp["since"])
+    notice = doc.get("notice")
+    if notice_phase(doc, ref) == "ended" and comp["id"] in notice.get("components", []):
+        started = max(started, parse(notice["ends_at"]))
+    return started
+
+
 def worse(a: str | None, b: str) -> str:
     return b if a is None or RANK[b] > RANK[a] else a
 
@@ -170,17 +179,23 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
     new = copy.deepcopy(doc)
     names = {c["id"]: c["name"] for c in new["components"]}
     before = {c["id"]: c["state"] for c in doc["components"]}
+    measured_down: set[str] = set()
     for comp in new["components"]:
         # 기능 하나가 주소 여럿에 기대면(관리 화면은 화면 파일과 API) 그중 나쁜 쪽을 따른다.
         checks = comp["check"] if isinstance(comp["check"], list) else [comp["check"]]
         seen = [results.get(c, "unknown") for c in checks]
         known = [s for s in seen if s != "unknown"]
+        if "down" in known:
+            measured_down.add(comp["id"])
         # 하나라도 못 쟀으면 그 기능의 확인 시각은 올리지 않는다. 막힌 채 예전 '정상'이 새 시각으로 굳으면 안 된다.
         if len(known) == len(seen):
             comp["checked_at"] = iso(now)
             comp.pop("pending", None)
         else:
             comp["pending"] = True
+            # 배포 직후처럼 기능 시각이 아직 없으면 앞 판의 문서 시각을 대신 둔다. 앞 상태는 그때 적힌 값이다.
+            if not comp.get("checked_at") and doc.get("checked_at"):
+                comp["checked_at"] = doc["checked_at"]
         # 하나라도 못 쟀으면 멈춤이 확실할 때만 바꾸고, 아니면 앞 상태를 둔다.
         if not known or (len(known) < len(seen) and "down" not in known):
             continue
@@ -189,23 +204,15 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
             comp["state"] = state
             comp["since"] = iso(now)
 
-    day = now.astimezone(KST).date()
-    history = new.setdefault("history", {})
-    record = history.setdefault(day.isoformat(), {})
-    for comp in new["components"]:
-        if shown(new, comp, now) == "checking":
-            continue
-        record[comp["id"]] = worse(record.get(comp["id"]), effective(new, comp, now))
-    cutoff = (day - timedelta(days=HISTORY_DAYS + 5)).isoformat()
-    for key in [k for k in history if k < cutoff]:
-        del history[key]
-
     incidents = new.setdefault("incidents", [])
     # 공개 기록은 두 번 잇달아 멈춰야(10분 간격이라 20분) 연다. 수동 API 배포처럼 잠깐 멈춘 건 상태 칸만 바뀐다.
+    # 이번 판에 실제로 잰 멈춤이어야 두 번째로 센다. 봇 검사로 못 잰 판은 앞 상태를 둘 뿐이다.
     confirmed = [
         c for c in new["components"]
-        if c["state"] == "down" and before.get(c["id"]) == "down" and effective(new, c, now) == "down"
+        if c["id"] in measured_down and before.get(c["id"]) == "down"
+        and c["state"] == "down" and effective(new, c, now) == "down"
     ]
+    starts = {c["id"]: down_start(new, c, now) for c in confirmed}
     open_auto = next((i for i in incidents if i.get("auto") and not i.get("resolved_at")), None)
     if confirmed:
         ids = [c["id"] for c in confirmed]
@@ -213,8 +220,7 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
             merged = set(open_auto["components"]) | set(ids)
             open_auto["components"] = [c["id"] for c in new["components"] if c["id"] in merged]
         else:
-            # 시작 시각은 기록을 연 때가 아니라 처음 멈춘 때로 적는다.
-            started = min(parse(c["since"]) for c in confirmed)
+            started = min(starts.values())
             incidents.insert(0, {
                 "id": started.astimezone(KST).strftime("%Y%m%d-%H%M"),
                 "auto": True,
@@ -231,6 +237,30 @@ def apply(doc: dict, results: dict[str, str], now: datetime) -> tuple[dict, bool
         if all(states.get(i) != "down" for i in open_auto["components"]):
             open_auto["resolved_at"] = iso(now)
     del incidents[KEEP_INCIDENTS:]
+
+    # 30일 띠의 장애 날은 장애 기록이 열린 날만이다. 한 번 실패하고 돌아온 판은 띠에 적지 않는다.
+    recorded = {i for inc in incidents if not inc.get("resolved_at") for i in inc.get("components", [])}
+    day = now.astimezone(KST).date()
+    history = new.setdefault("history", {})
+    record = history.setdefault(day.isoformat(), {})
+    for comp in new["components"]:
+        if shown(new, comp, now) == "checking":
+            continue
+        state = effective(new, comp, now)
+        if state == "down" and comp["id"] not in recorded:
+            continue
+        record[comp["id"]] = worse(record.get(comp["id"]), state)
+    cutoff = (day - timedelta(days=HISTORY_DAYS + 5)).isoformat()
+    # 기록이 열리면 처음 멈춘 날까지 거슬러 장애로 적는다(자정 너머 멈춘 경우).
+    for comp_id, start in starts.items():
+        back = start.astimezone(KST).date()
+        while back < day:
+            if back.isoformat() >= cutoff:
+                past = history.setdefault(back.isoformat(), {})
+                past[comp_id] = worse(past.get(comp_id), "down")
+            back += timedelta(days=1)
+    for key in [k for k in history if k < cutoff]:
+        del history[key]
 
     new["checked_at"] = iso(now)
     changed = significant(new) != significant(doc)
