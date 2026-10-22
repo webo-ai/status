@@ -5,6 +5,7 @@ import copy
 import http.client
 import io
 import json
+import re
 import tempfile
 import unittest
 import urllib.error
@@ -28,6 +29,10 @@ def fresh() -> dict:
     for comp in doc["components"]:
         comp["state"] = "ok"
     return doc
+
+
+def text(page: str) -> str:
+    return re.sub(r"<[^>]+>", "", page)
 
 
 def state_of(doc: dict, comp_id: str) -> str:
@@ -86,10 +91,10 @@ class ApplyTest(unittest.TestCase):
         self.assertTrue(admin["pending"])
         self.assertEqual(ai["checked_at"], status.iso(later))
         self.assertNotIn("pending", ai)
-        page = status.render(doc)
+        page = text(status.render(doc))
         self.assertIn("관리 화면 상태를 다시 확인하고 있습니다", page)
         self.assertIn("확인 중", page)
-        self.assertIn("마지막으로 확인한 때는 10월 22일 (목) 오후 12:00입니다.", page)
+        self.assertIn("마지막으로 확인한 때는 10월 22일 (목) 오후 12:00이고, 그 무렵까지 정상이었습니다.", page)
         self.assertNotIn("모든 서비스가 정상입니다", page)
         # 막힌 채 다음 판이 돌아도 확인 시각은 그대로다.
         doc, _ = status.apply(doc, {**ALL_OK, "app": "unknown"}, later + timedelta(minutes=60))
@@ -291,7 +296,9 @@ class RenderTest(unittest.TestCase):
         doc, _ = status.apply(fresh(), {**ALL_OK, "api": "down"}, T0)
         doc, _ = status.apply(doc, {**ALL_OK, "api": "down"}, T0 + timedelta(minutes=10))
         page = status.render(doc)
-        self.assertIn("관리 화면, AI 고치기, 게시가 지금 멈춰 있습니다", page)
+        self.assertIn("관리 화면, AI 고치기, 게시가 지금 멈춰 있습니다", text(page))
+        # 2차 9. 제목 속 기능 이름은 한 덩어리로 감싼다.
+        self.assertIn('<span class="nm">AI 고치기</span>', page)
         self.assertIn("상담 신청이 접수되지 않을 수 있습니다", page)
         self.assertIn("진행 중", page)
 
@@ -299,6 +306,38 @@ class RenderTest(unittest.TestCase):
         doc, _ = status.apply(fresh(), {**ALL_OK, "site": "down"}, T0)
         page = status.render(doc)
         self.assertIn("손님 홈페이지도 지금 열리지 않습니다", page)
+        self.assertNotIn("손님 홈페이지는 계속 열립니다", page)
+
+    # 2차 3. 확인 중 안내는 확인 중 칸에만 붙고, 멈춘 칸에서 일부를 못 쟀으면 따로 적는다.
+    def test_checking_note_only_on_checking_cell(self):
+        doc, _ = status.apply(fresh(), ALL_OK, T0)
+        doc, _ = status.apply(doc, {"app": "down", "api": "unknown", "site": "ok"}, T0 + timedelta(minutes=10))
+        page = status.render(doc)
+        cells = {c["id"]: part for c, part in zip(doc["components"], page.split('<li class="comp">')[1:])}
+        self.assertIn("장애", cells["admin"])
+        self.assertIn("일부 항목은 아직 확인하지 못했습니다.", cells["admin"])
+        self.assertNotIn("다시 확인하고 있습니다", cells["admin"])
+        self.assertIn("다시 확인하고 있습니다", cells["ai"])
+        self.assertNotIn("pending", cells["sites"])
+
+    # 2차 4. 기능 시각이 없으면 문서 시각을 쓰고 "아직 한 번도"라고 하지 않는다.
+    def test_checking_without_component_time_uses_document_time(self):
+        doc = fresh()
+        for comp in doc["components"]:
+            comp.pop("checked_at", None)
+        doc["components"][0]["pending"] = True
+        page = text(status.render(doc))
+        self.assertIn("마지막으로 확인한 때는 10월 22일 (목) 오후 12:00이고, 그 무렵까지 정상이었습니다.", page)
+        self.assertNotIn("아직 한 번도", page)
+        self.assertIn("페이지를 고친 때", page)
+        self.assertIn("자동 확인이 잠시 되지 않았습니다", page)
+
+    # 2차 5. 손님 사이트가 확인 중이면 "계속 열립니다"라고 단정하지 않는다.
+    def test_site_checking_does_not_promise_site(self):
+        doc, _ = status.apply(fresh(), ALL_OK, T0)
+        doc, _ = status.apply(doc, {**ALL_OK, "site": "unknown"}, T0 + timedelta(minutes=10))
+        page = status.render(doc)
+        self.assertIn("손님 홈페이지가 열리는지 다시 확인하고 있습니다", page)
         self.assertNotIn("손님 홈페이지는 계속 열립니다", page)
 
     def test_text_is_escaped(self):

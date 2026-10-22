@@ -283,6 +283,10 @@ main:focus {
   text-wrap: balance;
   overflow-wrap: normal;
 }
+/* 제목 속 기능 이름은 "AI / 고치기"처럼 두 줄로 갈리지 않게 한 덩어리로 둔다 */
+.hl .nm {
+  white-space: nowrap;
+}
 .lead {
   margin-top: 8px;
   color: var(--text);

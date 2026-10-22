@@ -333,21 +333,25 @@ LOGO = (
 
 
 def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
+    """(등급, 제목 HTML, 안내 글). 제목의 기능 이름은 한 덩어리로 감싸 두 줄로 갈리지 않게 한다."""
     names = {c["id"]: c["name"] for c in doc["components"]}
     worst = max(states.values(), key=SHOW_RANK.__getitem__)
-    hit = ", ".join(names[i] for i, s in states.items() if s == worst)
+    hit_names = [names[i] for i, s in states.items() if s == worst]
+    hit = ", ".join(f'<span class="nm">{esc(n)}</span>' for n in hit_names)
+    # 조사는 마지막 이름의 받침을 따른다.
+    ga = josa(hit_names[-1], "이", "가")[len(hit_names[-1]):]
     if worst == "ok":
         return worst, "모든 서비스가 정상입니다", "관리 화면부터 손님 사이트까지 평소처럼 돌아갑니다."
     if worst == "checking":
         return (
             worst,
             hit + " 상태를 다시 확인하고 있습니다",
-            "자동 확인이 잠시 닿지 않았습니다. 멈췄다는 뜻은 아니며, 확인되는 대로 이 페이지에 알려 드립니다.",
+            "자동 확인이 잠시 되지 않았습니다. 멈췄다는 뜻은 아니며, 확인되는 대로 이 페이지에 알려 드립니다.",
         )
     if worst == "slow":
         return (
             worst,
-            josa(hit, "이", "가") + " 평소보다 느립니다",
+            hit + ga + " 평소보다 느립니다",
             "열리기는 하지만 평소보다 오래 걸릴 수 있습니다. 잠시 기다렸다가 다시 시도해 주세요.",
         )
     if worst == "maintenance":
@@ -355,7 +359,7 @@ def headline(doc: dict, states: dict[str, str]) -> tuple[str, str, str]:
         return worst, hit + " 점검 중입니다", body
     return (
         worst,
-        josa(hit, "이", "가") + " 지금 멈춰 있습니다",
+        hit + ga + " 지금 멈춰 있습니다",
         "원인을 찾아 고치고 있습니다. 고치는 대로 이 페이지에 알려 드립니다.",
     )
 
@@ -369,7 +373,10 @@ def site_card(states: dict[str, str]) -> str:
         ]
         tone = "down"
     else:
-        title = "손님 홈페이지는 계속 열립니다"
+        if states["sites"] == "checking":
+            title = "손님 홈페이지가 열리는지 다시 확인하고 있습니다"
+        else:
+            title = "손님 홈페이지는 계속 열립니다"
         lines = [
             "이미 게시한 매장 홈페이지는 관리 화면과 따로 운영됩니다.",
             "관리 화면이나 AI 고치기가 멈춰도 손님은 홈페이지를 그대로 볼 수 있습니다.",
@@ -423,10 +430,15 @@ def components_html(doc: dict, states: dict[str, str], ref: datetime) -> str:
     for comp in doc["components"]:
         state = states[comp["id"]]
         note = ""
-        if comp.get("pending"):
-            last = parse(comp.get("checked_at"))
-            told = f"마지막으로 확인한 때는 {when(last)}입니다." if last else "아직 한 번도 확인하지 못했습니다."
-            note = f'<p class="pending">자동 확인이 잠시 닿지 않아 다시 확인하고 있습니다. {esc(told)}</p>'
+        if state == "checking":
+            # 기능 시각은 파일을 새로 쓸 때만 적혀 실제보다 이를 수 있다. 그래서 "무렵까지"로 넓게 적는다.
+            last = parse(comp.get("checked_at") or doc["checked_at"])
+            was = "정상이었습니다" if comp["state"] == "ok" else "열리지만 느렸습니다"
+            told = f"자동 확인이 잠시 되지 않아 다시 확인하고 있습니다. 마지막으로 확인한 때는 {when(last)}이고, 그 무렵까지 {was}."
+            note = f'<p class="pending">{esc(told)}</p>'
+        elif comp.get("pending"):
+            # 멈춤·점검 칸은 등급이 정해져 있다. "확인 중" 안내를 붙이면 "멈췄다"와 부딪친다.
+            note = '<p class="pending">일부 항목은 아직 확인하지 못했습니다.</p>'
         rows.append(
             f'<li class="comp"><div class="comp-top"><div><h3>{esc(comp["name"])}</h3>'
             f'<p class="sub">{esc(comp["desc"])}</p>{note}</div>'
@@ -525,10 +537,10 @@ def render(doc: dict) -> str:
   <section class="hero is-{worst}" aria-labelledby="h-status">
     <span class="hero-mark">{icon(worst, "ic ic-xl")}</span>
     <div class="hero-txt">
-      <h1 id="h-status"><span class="eyebrow">웹오 서비스 상태 · {LABEL[worst]}</span><span class="hl">{esc(title)}</span></h1>
+      <h1 id="h-status"><span class="eyebrow">웹오 서비스 상태 · {LABEL[worst]}</span><span class="hl">{title}</span></h1>
       <p class="lead">{esc(lead)}</p>
       <ul class="hero-list" aria-label="기능별 한눈 상태">{hero_list}</ul>
-      <p class="checked">마지막으로 적은 때 <time datetime="{esc(doc["checked_at"])}">{esc(checked)}</time> (한국 시간)</p>
+      <p class="checked">페이지를 고친 때 <time datetime="{esc(doc["checked_at"])}">{esc(checked)}</time> (한국 시간)</p>
       <p class="checked-note">상태가 그대로면 이 시각은 한 시간에 한 번쯤 바뀝니다.</p>
     </div>
   </section>
