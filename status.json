@@ -1,7 +1,7 @@
 {
   "version": 1,
   "contact": "webomni.team@gmail.com",
-  "checked_at": "2026-10-22T10:45+09:00",
+  "checked_at": "2026-10-22T22:00+09:00",
   "checks": {
     "app": {
       "url": "https://app.webomni.dpdns.org/",
@@ -21,9 +21,16 @@
       "id": "admin",
       "name": "관리 화면",
       "desc": "사장님이 로그인해 매장 정보를 보고 고치는 화면입니다.",
-      "check": ["app", "api"],
+      "check": [
+        "app",
+        "api"
+      ],
       "state": "ok",
-      "since": "2026-10-22T00:00+09:00"
+      "since": "2026-10-22T00:00+09:00",
+      "streak": 0,
+      "streak_since": null,
+      "failing": false,
+      "checked_at": "2026-10-22T22:00+09:00"
     },
     {
       "id": "ai",
@@ -31,7 +38,11 @@
       "desc": "말로 요청하면 AI가 홈페이지 글과 디자인을 고쳐 드립니다.",
       "check": "api",
       "state": "ok",
-      "since": "2026-10-22T00:00+09:00"
+      "since": "2026-10-22T00:00+09:00",
+      "streak": 0,
+      "streak_since": null,
+      "failing": false,
+      "checked_at": "2026-10-22T22:00+09:00"
     },
     {
       "id": "publish",
@@ -39,7 +50,11 @@
       "desc": "고친 내용을 손님이 보는 홈페이지에 올리고, 상담 신청을 받습니다.",
       "check": "api",
       "state": "ok",
-      "since": "2026-10-22T00:00+09:00"
+      "since": "2026-10-22T00:00+09:00",
+      "streak": 0,
+      "streak_since": null,
+      "failing": false,
+      "checked_at": "2026-10-22T22:00+09:00"
     },
     {
       "id": "sites",
@@ -47,7 +62,11 @@
       "desc": "손님이 보는 매장 홈페이지입니다.",
       "check": "site",
       "state": "ok",
-      "since": "2026-10-22T00:00+09:00"
+      "since": "2026-10-22T00:00+09:00",
+      "streak": 0,
+      "streak_since": null,
+      "failing": false,
+      "checked_at": "2026-10-22T22:00+09:00"
     }
   ],
   "notice": null,
