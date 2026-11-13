@@ -1,7 +1,7 @@
 {
   "version": 1,
   "contact": "webomni.team@gmail.com",
-  "checked_at": "2026-11-14T00:15+09:00",
+  "checked_at": "2026-11-14T06:27+09:00",
   "checks": {
     "app": {
       "url": "https://app.webomni.dpdns.org/",
@@ -30,7 +30,7 @@
       "streak": 0,
       "streak_since": null,
       "failing": false,
-      "checked_at": "2026-11-14T00:15+09:00"
+      "checked_at": "2026-11-14T06:27+09:00"
     },
     {
       "id": "ai",
@@ -42,7 +42,7 @@
       "streak": 0,
       "streak_since": null,
       "failing": false,
-      "checked_at": "2026-11-14T00:15+09:00"
+      "checked_at": "2026-11-14T06:27+09:00"
     },
     {
       "id": "publish",
@@ -54,7 +54,7 @@
       "streak": 0,
       "streak_since": null,
       "failing": false,
-      "checked_at": "2026-11-14T00:15+09:00"
+      "checked_at": "2026-11-14T06:27+09:00"
     },
     {
       "id": "sites",
@@ -64,9 +64,9 @@
       "state": "down",
       "since": "2026-11-12T01:20+09:00",
       "streak": 1,
-      "streak_since": "2026-11-14T00:15+09:00",
+      "streak_since": "2026-11-14T06:27+09:00",
       "failing": true,
-      "checked_at": "2026-11-14T00:15+09:00"
+      "checked_at": "2026-11-14T06:27+09:00"
     }
   ],
   "notice": null,
